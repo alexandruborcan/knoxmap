@@ -184,7 +184,7 @@ def recount(out_dir: str, settings) -> dict:
     fp_path = os.path.join(out_dir, f"{map_name}_footprints.npz")
     if not os.path.exists(fp_path):
         raise FileNotFoundError("generate the buildings first")
-    with open(os.path.join(out_dir, f"{map_name}_info.json")) as f:
+    with open(os.path.join(out_dir, f"{map_name}_info.json"), encoding="utf-8") as f:
         info = json.load(f)
     img, summary = build_spawn_map(load_footprints(fp_path), info["width_tiles"],
                                    info["height_tiles"], info["meters_per_tile"],

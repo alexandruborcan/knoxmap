@@ -22,6 +22,7 @@ import pyproj
 from PIL import Image, ImageDraw, ImageFilter
 
 from . import pz_colors as C
+from . import structures
 from .osm import FENCE_BARRIERS, OSMFeature, classify
 
 
@@ -547,6 +548,7 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
     building_feats: list[OSMFeature] = []
     fence_feats: list[OSMFeature] = []
     place_feats: list[OSMFeature] = []
+    monument_feats: list[OSMFeature] = []
     for feat in features:
         # Fences and hedges are collected from any outline that carries one,
         # before and independently of what the outline is: the fence around a
@@ -554,6 +556,8 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
         if feat.kind == "node" and "population" in feat.tags and "place" in feat.tags:
             place_feats.append(feat)
             continue
+        if structures.monument_kind(feat.tags):
+            monument_feats.append(feat)
         if feat.kind == "node" and "natural" not in feat.tags:
             continue      # shops and cafes inside buildings: knoxbuild/uses.py
         barrier = feat.tags.get("barrier")
@@ -576,6 +580,26 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
             building_feats.append(feat)
         buckets.setdefault(cat, []).append(feat)
 
+    # Bridges lifted over the roads they cross, and monuments. See
+    # generator/structures.py; what they leave out of the ground is cut here.
+    lifted = structures.Plan()
+    structures.plan_bridges(buckets, proj, meters_per_tile, _way_width_m, lifted)
+    structures.plan_monuments(monument_feats, proj, meters_per_tile, lifted)
+    if lifted.not_buildings:
+        building_feats = [f for f in building_feats if id(f) not in lifted.not_buildings]
+        buckets["building"] = [f for f in buckets.get("building", [])
+                               if id(f) not in lifted.not_buildings]
+
+    def ground_rings(feat: OSMFeature) -> list[list[tuple[float, float]]]:
+        rings = _feature_coords_px(feat, proj)
+        cut = lifted.cut.get(id(feat))
+        if cut is None:
+            return rings
+        from shapely.geometry import LineString as _Line
+        left = _Line(rings[0]).difference(cut)
+        return [list(g.coords) for g in getattr(left, "geoms", [left])
+                if g.geom_type == "LineString" and not g.is_empty]
+
     # The sea first, under everything: a pier or a beach mapped over it
     # paints on top.
     for sea in sea_polygons(buckets.get("coastline", []), proj):
@@ -597,14 +621,14 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
                     if _is_polygon(feat):
                         continue
                     width_px = (_way_width_m(feat, road) + 2 * margin) / meters_per_tile
-                    _draw_line(l_draw, _feature_coords_px(feat, proj),
+                    _draw_line(l_draw, ground_rings(feat),
                                C.PALE_CONCRETE, int(width_px))
             for road, verge in VERGE_M.items():
                 for feat in buckets.get(road, []):
                     if _is_polygon(feat):
                         continue
                     width_px = (_way_width_m(feat, road) + 2 * verge) / meters_per_tile
-                    _draw_line(l_draw, _feature_coords_px(feat, proj),
+                    _draw_line(l_draw, ground_rings(feat),
                                C.DARK_GRASS, int(width_px))
         fill = LANDSCAPE_FILL.get(cat)
         if fill is None:
@@ -613,7 +637,7 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
             rings = _feature_coords_px(feat, proj)
             if cat in ROAD_WIDTHS_M and not _is_polygon(feat):
                 width_px = _way_width_m(feat, cat) / meters_per_tile
-                _draw_line(l_draw, rings, fill, int(width_px))
+                _draw_line(l_draw, ground_rings(feat), fill, int(width_px))
             elif feat.kind == "relation":
                 _paint_multipolygon(landscape, feat, proj, fill)
             elif _is_polygon(feat):
@@ -623,7 +647,12 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
                 metres = WATERWAY_WIDTH_M.get(feat.tags.get("waterway"), 3.0)
                 _draw_line(l_draw, rings, fill, max(1, int(metres / meters_per_tile)))
 
+    # Bridges over water squared to the tiles (generator/structures.py).
+    for deck, cat in lifted.straight:
+        l_draw.rectangle(deck.bounds, fill=LANDSCAPE_FILL.get(cat, C.MEDIUM_ASPHALT))
     _pave_dense_ground(landscape, building_feats, buckets, proj)
+    for paved in lifted.paving:
+        l_draw.polygon(list(paved.exterior.coords), fill=C.PAVING)
     if clip is not None:
         _clip_to_shape(landscape, clip, buckets, proj)
     _weather_roads(landscape, proj)
@@ -634,6 +663,17 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
     _clear_building_vegetation(vegetation, building_feats, proj)
     _paint_road_details(vegetation, landscape, buckets, proj)
     _paint_street_furniture(vegetation, landscape)
+    # Nothing grows through a deck or a ramp, and no lamp stands on one.
+    veg_px = vegetation.load()
+    for x, y in lifted.clear_veg:
+        if 0 <= x < proj.width and 0 <= y < proj.height:
+            veg_px[x, y] = C.VEG_NOTHING
+    structures.rail_water(lifted, landscape, C.WATER)
+    ground_px = landscape.load()
+    under = {C.WATER, C.MEDIUM_ASPHALT, C.DARK_ASPHALT, C.DARKEST_ASPHALT,
+             C.LIGHT_ASPHALT, C.PALE_CONCRETE}
+    structures.settle_posts(lifted, lambda x, y: 0 <= x < proj.width and 0 <= y < proj.height
+                            and ground_px[x, y] not in under)
 
     # --- zombie spawn map (10x smaller, grayscale) ---
     spawn_w = proj.width // C.SPAWN_MAP_SCALE
@@ -661,19 +701,22 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
     spawn_map.save(spawn_path, format="BMP")
     preview.save(preview_path, format="PNG")
 
-    with open(buildings_path, "w") as f:
+    with open(buildings_path, "w", encoding="utf-8") as f:
         json.dump(_buildings_geojson(building_feats), f)
-    with open(os.path.join(output_dir, f"{map_name}_areas.geojson"), "w") as f:
+    with open(os.path.join(output_dir, f"{map_name}_areas.geojson"), "w", encoding="utf-8") as f:
         json.dump(_areas_geojson(buckets), f)
-    with open(os.path.join(output_dir, f"{map_name}_fences.geojson"), "w") as f:
+    with open(os.path.join(output_dir, f"{map_name}_fences.geojson"), "w", encoding="utf-8") as f:
         json.dump(_lines_geojson([f for f in fence_feats
                                   if clip is None or _inside(f, proj, clip)]), f)
+    with open(os.path.join(output_dir, f"{map_name}_structures.json"), "w", encoding="utf-8") as f:
+        json.dump({"bridges": lifted.bridges, "monuments": lifted.monuments,
+                   "tiles": lifted.rows()}, f)
     with open(os.path.join(output_dir, f"{map_name}_places.json"), "w",
               encoding="utf-8") as f:
         json.dump(_places(place_feats, proj), f, ensure_ascii=False)
 
     cells_x, cells_y = proj.cell_grid()
-    with open(meta_path, "w") as f:
+    with open(meta_path, "w", encoding="utf-8") as f:
         json.dump({
             "map_name": map_name,
             "bbox": {"south": south, "west": west, "north": north, "east": east},

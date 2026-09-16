@@ -75,6 +75,12 @@ OVERPASS_FILTERS: Sequence[str] = (
     'way["highway"]',
     'way["area:highway"]',
     'way["place"="square"]',
+    # Monuments, statues and fountains: generator/structures.py
+    'node["historic"~"^(monument|memorial)$"]',
+    'way["historic"~"^(monument|memorial)$"]',
+    'nwr["man_made"="obelisk"]',
+    'node["tourism"="artwork"]',
+    'nwr["amenity"="fountain"]',
     # buildings
     'way["building"]',
     'relation["building"]',
@@ -114,7 +120,7 @@ OVERPASS_FILTERS: Sequence[str] = (
 
 # Bumped whenever the filters above change, so a cached download made with
 # the old list is fetched again instead of silently lacking the new features.
-FILTERS_VERSION = 8
+FILTERS_VERSION = 9
 
 
 @dataclass

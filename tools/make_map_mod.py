@@ -159,7 +159,7 @@ def write_spawnpoints(project_dir: str, map_dir: str, limit: int = 8) -> int:
                 break
         if info:
             import json as _json
-            with open(info) as f:
+            with open(info, encoding="utf-8") as f:
                 meta = _json.load(f)
             points = [(meta["width_tiles"] // 2, meta["height_tiles"] // 2)]
         else:

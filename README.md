@@ -39,8 +39,12 @@ actually lived, and installs the result as a mod.
 - **The real street plan.** Roads at their real widths, with pavements, kerbs
   and centre lines. The map is turned so the town's main street grid runs along
   the game's tiles, so streets are straight lines, not staircases.
-- **Water, bridges and railways.** Seas and harbours, rivers with their bridges
-  intact, canals, piers and railway lines.
+- **Water, bridges and railways.** Seas and harbours, rivers with square
+  railed bridges, canals, piers and railway lines. A road or railway over
+  another is a real overpass: ramps up to a railed deck, the road below
+  running on underneath.
+- **Monuments** as themselves: arches, columns, statues on paved squares and
+  fountains, instead of little houses.
 - **Buildings you can walk into**, every one on its real footprint. Houses with
   bedrooms upstairs; blocks of flats with a corridor and separate flats; shops,
   schools, churches, clinics, offices and factories laid out as what they are.
@@ -205,8 +209,9 @@ playing. Help is very welcome here, especially screenshots from the game.
 - **Winding old towns** have no single street grid, so their streets still step
   across the tiles where they turn.
 - **Very large buildings** (over 200 tiles across by default) are skipped.
-- **Stacked roads:** motorway interchanges and overpasses are laid at ground
-  level, so roads that pass over each other meet there; tunnels are left out.
+- **Overpasses** are lifted one or two storeys on Build 42's ramp tiles, which
+  carry players and cars; not yet driven in game. Big interchanges come out
+  busy, and tunnels are left out.
 - **Turned buildings** keep their real angle with stepped walls unless they are
   within *Square up buildings* degrees of the grid (15 by default; 45 stands
   every building upright).

@@ -93,6 +93,22 @@ def town() -> list[OSMFeature]:
     # A river with a bridge carrying High Street over it.
     feats.append(way({"waterway": "river", "name": "Selftest River"}, [(560, 30), (560, 600)]))
     feats.append(way({"natural": "water", "water": "river"}, box(550, 0, 572, 600)))
+    # A lane over the river on a bridge a little off square, to be laid square.
+    feats.append(way({"highway": "residential"}, [(500, 452), (540, 452)]))
+    feats.append(way({"highway": "residential", "bridge": "yes", "layer": "1",
+                      "name": "Selftest Bridge"}, [(540, 452), (582, 458)]))
+    feats.append(way({"highway": "residential"}, [(582, 458), (600, 458)]))
+    # A flyover: a main road on a bridge over Avenue 5, with room for ramps.
+    feats.append(way({"highway": "primary"}, [(510, 250), (510, 330)]))
+    feats.append(way({"highway": "primary", "bridge": "yes", "layer": "1",
+                      "name": "Selftest Flyover"}, [(510, 330), (510, 470)]))
+    feats.append(way({"highway": "primary"}, [(510, 470), (510, 540)]))
+    # A statue and a triumphal arch in the park.
+    statue = OSMFeature(next(_ids), "node", {"historic": "memorial", "memorial": "statue",
+                                             "name": "Selftest Statue"}, [_ll(450, 450)])
+    feats.append(statue)
+    feats.append(way({"building": "triumphal_arch", "historic": "monument", "height": "12",
+                      "name": "Selftest Arch"}, box(420, 420, 432, 425)))
     # A coast along the south: land on the left of the line, sea to the right.
     # Deliberately short: a real download often holds only part of a shore.
     feats.append(way({"natural": "coastline"}, [(0, 30), (600, 30)]))
@@ -148,6 +164,30 @@ def main(argv: list[str]) -> int:
         check(colours.get(C.MEDIUM_ASPHALT, 0) > 0 and colours.get(C.DARKEST_ASPHALT, 0) > 0,
               "streets and the main road are tarmac")
         check(colours.get(C.PALE_CONCRETE, 0) > 0, "streets have pavements")
+        print("bridges and monuments")
+        import json as _json
+        raised = _json.load(open(os.path.join(out, "selftest_structures.json"), encoding="utf-8"))
+        tiles = raised["tiles"]
+        check(any(t[3] == "Floor" and t[4].startswith("ramps_01") and t[2] == 0 for t in tiles)
+              and any(t[3] == "Floor" and t[2] == 1 for t in tiles),
+              "the flyover climbs on ramps to a deck a storey up")
+        proj = renderer.Projector.build(SOUTH, WEST, NORTH, EAST, 1.0, -angle)
+        ax, ay = proj.to_px(*_ll(510, 400))
+        under = {ground.getpixel((int(ax) + dx, int(ay) + dy)) for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+        check(C.DARKEST_ASPHALT not in under,
+              "the avenue runs on under the flyover instead of meeting it")
+        bx, by = proj.to_px(*_ll(556, 455))
+        cx, _ = proj.to_px(*_ll(567, 455))
+
+        def tarmac_rows(x):
+            return [y for y in range(int(by) - 15, int(by) + 15)
+                    if ground.getpixel((int(x), y)) == C.MEDIUM_ASPHALT]
+        check(tarmac_rows(bx) and tarmac_rows(bx) == tarmac_rows(cx),
+              "the bridge over the river is laid square")
+        names = open(os.path.join(out, "selftest_buildings.geojson"), encoding="utf-8").read()
+        check(any("cemetary_01" in t[4] for t in tiles) and "Selftest Arch" not in names
+              and any(t[4] == "ramps_01_19" and t[2] >= 2 for t in tiles),
+              "a statue stands in the park and the arch is an arch, not a house")
         veg = Image.open(os.path.join(out, "selftest_veg.bmp")).convert("RGB")
         pixels = veg.get_flattened_data() if hasattr(veg, "get_flattened_data") else veg.getdata()
         kerbs = sum(1 for c in pixels if c[0] == 12 and c[1] == 34)
@@ -181,7 +221,7 @@ def main(argv: list[str]) -> int:
             west = re.search(r'enum="West" tile="(\w+)"', blocks[ext - 1])
             gap = re.search(r'enum="CapGapE3" tile="(\w+)"', blocks[cap - 1])
             return bool(west and gap and west.group(1) == gap.group(1))
-        houses_tbx = [t for p, t in zip(tbx, texts) if "_fences_" not in p]
+        houses_tbx = [t for p, t in zip(tbx, texts) if "_fences_" not in p and "_structures_" not in p]
         check(all(gaps_match(t) for t in houses_tbx), "flat roofs wall in the top floor with its own material")
         check(any("_fences_" in p for p in tbx), "back yards are fenced")
         yard = Image.open(os.path.join(out, "selftest.bmp")).convert("RGB")

@@ -569,9 +569,9 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
         return 2
     map_name = names[0][: -len("_info.json")]
 
-    with open(os.path.join(out_dir, f"{map_name}_info.json")) as f:
+    with open(os.path.join(out_dir, f"{map_name}_info.json"), encoding="utf-8") as f:
         info = json.load(f)
-    with open(os.path.join(out_dir, f"{map_name}_buildings.geojson")) as f:
+    with open(os.path.join(out_dir, f"{map_name}_buildings.geojson"), encoding="utf-8") as f:
         geo = json.load(f)
 
     bbox = info["bbox"]
@@ -822,7 +822,9 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
                           placements, settings=settings)
     # Fences go into the project alongside the buildings, but not into the
     # town zones: a fence lot spans its whole cell and would mark it all town.
-    placements = placements + fence_placements
+    from .structures import build_structures
+    structure_placements, raised = build_structures(out_dir, map_name, bdir)
+    placements = placements + fence_placements + structure_placements
 
     pzw_path = os.path.join(out_dir, f"{map_name}.pzw")
     with open(pzw_path, "w", encoding="utf-8") as f:
@@ -873,6 +875,9 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     print(f"front paths, yards    : {paths} houses, {len(yard_fences)} back yards")
     print(f"fences                : {fence_tiles} fence tiles in "
           f"{len(fence_placements)} lots")
+    print(f"bridges, monuments    : {raised['bridges']} bridges, "
+          f"{raised['monuments']} monuments, {raised['tiles']} tiles in "
+          f"{len(structure_placements)} lots")
     print(f"paper map             : {paper_map['map_features']} features in "
           f"{paper_map['map_cells']} cells, {paper_map['streets']} named streets, "
           f"{paper_map['labels']} labels")

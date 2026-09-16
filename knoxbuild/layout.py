@@ -330,13 +330,16 @@ def _split(x0: int, y0: int, x1: int, y1: int, rng: random.Random,
 # Size matters: a two-room flat is a bedsit and wants a bathroom more than it
 # wants a separate bedroom.
 FLAT_PLANS = {
-    1: ["livingroom"],
-    2: ["livingroom", "bathroom"],
+    # A one-room flat is a bedsit: somewhere to sleep, not a sofa and nothing.
+    1: ["bedroom"],
+    2: ["bedroom", "bathroom"],
     3: ["livingroom", "bedroom", "bathroom"],
     4: ["livingroom", "kitchen", "bedroom", "bathroom"],
     5: ["livingroom", "kitchen", "bedroom", "bedroom", "bathroom"],
 }
 FLAT_EXTRA = ["bedroom", "storage"]
+# Floor area, in tiles, from which a flat is cut into at least three rooms.
+FLAT_MIN_SPLIT_AREA = 30
 # Tiles of corridor wall each flat gets. Narrower slices gave two- and
 # three-room flats, and with the bathroom going to the smallest room, a flat
 # of two big rooms had a bathroom the size of its living room.
@@ -422,6 +425,15 @@ def _apartment_rooms(plan: Plan, rng: random.Random, target: int,
             box = (a0, s0, a1, s1) if axis == "y" else (s0, a0, s1, a1)
             flat: list[Room] = []
             _split(*box, rng, MAX_DEPTH, flat, target_area=target, mask=plan.mask)
+            # A flat that came out as one or two rooms was all living room: in
+            # a small block every flat on every floor had nothing else, not a
+            # bed or a bathroom in the building. Cut it into a home's rooms
+            # when it is big enough for them.
+            area = (box[2] - box[0] + 1) * (box[3] - box[1] + 1)
+            if frontage == FLAT_FRONTAGE and len(flat) < 3 and area >= FLAT_MIN_SPLIT_AREA:
+                flat = []
+                _split(*box, rng, MAX_DEPTH, flat, target_area=max(MIN_SPLIT * MIN_ROOM, area // 3),
+                       mask=plan.mask)
             for room in flat:
                 room.unit = unit
             plan.rooms.extend(flat)
@@ -1408,6 +1420,14 @@ def _place_windows(building: "Building", kind: str | None,
 
     for level, storey in enumerate(building.storeys):
         blocked = set(getattr(storey, "wall_pieces", set())) | storey.party
+        # No window where a tile carries both a west and a north wall - the
+        # inside corner of every step down a diagonal side. BuildingEd draws
+        # that corner as one piece; a window there replaced it with a window
+        # facing one way, and the other half of the wall was left out.
+        edges = {(x, y, d) for _side, wall in _facade_runs(storey.grid)
+                 for x, y, d, _ix, _iy in wall}
+        blocked |= {(x, y, d) for x, y, d in edges
+                    if (x, y, "N" if d == "W" else "W") in edges}
         # Shuttered windows need the tile either side for their shutters: a
         # window two tiles from a door or another window had its shutters
         # jammed against the frame or overlapping the next one's.
@@ -1727,8 +1747,11 @@ def _furnish(plan: Plan, rng: random.Random,
         door_edges |= {(lx, ly + i, "W") if ld == "W" else (lx + i, ly, "N")
                        for i in range(SHAFT_SIZE)}
     for x, y, d in plan.doors:
-        door_tiles.add((x, y))
-        door_tiles.add((x - 1, y) if d == "W" else (x, y - 1))
+        # Two tiles deep either side: one clear tile in front of a door still
+        # had a fridge or a bookcase on the next, and nobody could step past.
+        for k in range(DOOR_CLEAR_DEPTH):
+            door_tiles.add((x + k, y) if d == "W" else (x, y + k))
+            door_tiles.add((x - 1 - k, y) if d == "W" else (x, y - 1 - k))
     # Tiles of the flight. A switch hung there would be deleted along with the
     # furniture cleared off the staircase, leaving the stair hall dark.
     stair_tiles: set[tuple[int, int]] = set()
@@ -1900,7 +1923,16 @@ def _furnish(plan: Plan, rng: random.Random,
                     continue
                 if any(_room_at(plan, cx, cy) != idx for cx, cy in cells):
                     continue
+                front = set()
+                if _needs_front(role):
+                    # A fridge, a stove or a wardrobe is opened from the tile
+                    # in front of it; that tile stays floor.
+                    fx, fy = {"N": (0, 1), "S": (0, -1), "W": (1, 0), "E": (-1, 0)}[wanted]
+                    front = {(cx + fx, cy + fy) for cx, cy in cells} - set(cells)
+                    if any(c in occupied or _room_at(plan, *c) != idx for c in front):
+                        continue
                 occupied.update(cells)
+                occupied.update(front)
                 plan.furniture.append((role, x, y, orient))
                 break
 
@@ -1911,6 +1943,60 @@ def _furnish(plan: Plan, rng: random.Random,
         elif r.kind in KITCHENS:
             _counter_runs(plan, idx, slots, occupied, door_tiles, stair_tiles,
                           pal.get("counter", "counter"))
+        _stand_on_something(plan, idx, r, pal)
+
+
+# Pieces drawn at worktop height: a sink, a television, a table lamp, a pot
+# plant. Put down on their own they float over bare floor - a sink plumbed into
+# the ground - so each gets something to stand on first, the way the game's
+# own houses have them. Found by the height of their sprites (a floating
+# piece's lowest pixel sits well above the floor diamond); the television is
+# drawn standing, but no home keeps one on the carpet.
+SURFACE_ROLES = {"kitchen_sink", "sink", "lamp", "tv"}
+WORKTOP_ROOMS = {"kitchen", "bathroom", "laundry", "breakroom"} | KITCHENS
+# Opened from the front: the tile before them is kept clear.
+FRONT_CLEAR_ROLES = {"fridge", "stove", "stove_alt", "washer", "dryer", "wardrobe",
+                     "bookshelf", "dresser", "dresser_alt", "filing_cabinet"}
+DOOR_CLEAR_DEPTH = 2
+
+
+def _needs_front(role: str) -> bool:
+    return role in FRONT_CLEAR_ROLES or role.startswith(("wardrobe", "dresser", "fridge"))
+
+
+def _needs_surface(role: str) -> bool:
+    return role in SURFACE_ROLES or role.startswith("erika_plant")
+
+
+def _stand_on_something(plan: Plan, idx: int, room: Room, palette: dict) -> None:
+    """A counter, a cabinet or a small table under every piece of this room
+    that needs one and does not have one."""
+    standing: set[tuple[int, int]] = set()
+    mine = []
+    for n, (role, x, y, o) in enumerate(plan.furniture):
+        if _room_at(plan, x, y) != idx or _is_wall_piece(role):
+            continue
+        mine.append(n)
+        if not _needs_surface(role):
+            standing.update(_cells_for(role, x, y, o))
+    added = []
+    for n in mine:
+        role, x, y, o = plan.furniture[n]
+        if not _needs_surface(role) or (x, y) in standing:
+            continue
+        if room.kind in WORKTOP_ROOMS or role.endswith("sink"):
+            support = palette.get("counter", "counter")
+        elif role == "tv":
+            support = "dresser"
+        else:
+            support = "table"
+        if support not in C.FURNITURE:
+            continue
+        added.append((n, (support, x, y, _facing(support, o))))
+        standing.add((x, y))
+    # Each support goes in just before its piece, so it is drawn underneath.
+    for n, piece in sorted(added, reverse=True):
+        plan.furniture.insert(n, piece)
 
 
 def _counter_runs(plan: Plan, idx: int, slots, occupied: set,

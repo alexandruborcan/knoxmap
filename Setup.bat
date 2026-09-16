@@ -2,6 +2,9 @@
 rem KnoxMap one-time setup. Safe to run again.
 setlocal
 cd /d "%~dp0"
+rem UTF-8 for every file Python reads and writes, whatever the PC's code page.
+rem On a Korean or Japanese Windows the default one cannot hold all of KnoxMap's text.
+set PYTHONUTF8=1
 
 rem Prefer the py launcher; "python" on a fresh Windows can be the Microsoft
 rem Store stub, which opens the Store instead of running anything. Either way

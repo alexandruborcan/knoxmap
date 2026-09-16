@@ -390,6 +390,12 @@ def bed_against_wall(plan, idx: int, room, slots, occupied: set, door_tiles: set
             got = L._cells_for(bed, ax, ay, orient)
             if any(c in occupied or c in door_tiles or L._room_at(plan, *c) != idx for c in got):
                 continue
+            # A row of floor at the foot of the bed, or it wall-to-walls a
+            # narrow bedroom and the far side of the room cannot be reached.
+            dx, dy = {"N": (0, 1), "S": (0, -1), "W": (1, 0), "E": (-1, 0)}[side]
+            foot = {(cx + dx, cy + dy) for cx, cy in got} - set(got)
+            if any(c in occupied or L._room_at(plan, *c) != idx for c in foot):
+                continue
             if side in ("N", "S"):
                 edge_y = y
                 flank = [(ax - 1, edge_y), (ax + w + 1, edge_y)]
@@ -398,6 +404,7 @@ def bed_against_wall(plan, idx: int, room, slots, occupied: set, door_tiles: set
                 flank = [(edge_x, ay - 1), (edge_x, ay + h + 1)]
             plan.furniture.append((bed, ax, ay, orient))
             occupied.update(got)
+            occupied.update(foot)
             if side_table and side_table in C.FURNITURE:
                 t_or = L._facing(side_table, side)
                 for fx, fy in flank:

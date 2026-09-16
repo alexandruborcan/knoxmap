@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.1
+
+**Fixes from the Discord**
+- Errors come back as a message and a knoxmap_error.log, not "<!doctype is
+  not valid JSON"; and the app runs in UTF-8, which fixes generating a map on
+  Korean and Japanese Windows.
+- Overpasses and flyovers on ramps, with railed decks on posts, and the roads
+  underneath left whole; bridges over water laid square with railings.
+- Arches, columns, statues and fountains from OpenStreetMap's monuments.
+- Sinks, televisions, lamps and pot plants stand on a counter, cabinet or table;
+  nothing blocks the two tiles in front of a door or the tile in front of a
+  fridge, stove or wardrobe; a bed keeps floor at its foot.
+- No window on the inside corner of a stepped diagonal wall, where it took half
+  the wall with it.
+- Small blocks of flats have bedrooms and bathrooms, not a living room for
+  every flat.
+
 ## 1.0 (first release)
 
 KnoxMap grows [Knoxify](https://github.com/arytek/knoxify)'s terrain generator

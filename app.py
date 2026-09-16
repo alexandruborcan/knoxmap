@@ -46,6 +46,35 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
 
 
+ERROR_LOG = BASE_DIR / "knoxmap_error.log"
+
+
+@app.errorhandler(Exception)
+def _api_error(exc):
+    """Every failure as JSON the page can show, with the details in a log.
+
+    Flask's default answer to an exception is an HTML page. The page reads
+    every reply as JSON, so a crash anywhere in a request showed only
+    "Unexpected token '<', "<!doctype"... is not valid JSON", which says
+    nothing about what went wrong or where.
+    """
+    import traceback
+    from werkzeug.exceptions import HTTPException
+
+    if isinstance(exc, HTTPException):
+        if not request.path.startswith("/api/"):
+            return exc
+        return jsonify({"error": f"{exc.code} {exc.name}"}), exc.code
+    try:
+        with open(ERROR_LOG, "a", encoding="utf-8") as log:
+            log.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')} {request.method} "
+                      f"{request.path}\n{traceback.format_exc()}\n")
+    except OSError:
+        pass
+    return jsonify({"error": f"{type(exc).__name__}: {exc} - the full error is in "
+                             f"{ERROR_LOG.name} in the KnoxMap folder"}), 500
+
+
 @app.before_request
 def _only_local():
     host = (request.host or "").rsplit(":", 1)[0] if not (request.host or "").startswith("[")         else (request.host or "").split("]")[0] + "]"
@@ -673,7 +702,7 @@ def api_settings():
 def _expected_cells(map_dir: Path) -> int:
     """How many 256-tile cells the compile should produce, for a progress bar."""
     try:
-        with open(map_dir / f"{map_dir.name}_info.json") as f:
+        with open(map_dir / f"{map_dir.name}_info.json", encoding="utf-8") as f:
             info = json.load(f)
     except Exception:
         return 0
@@ -872,7 +901,10 @@ Notes
   The GeoJSON file lets you see where buildings would sit in the real
   world and drop matching .tbx lots in the right tiles.
 """
-    (map_dir / "README.txt").write_text(text)
+    # UTF-8 whatever the PC's code page: the text has dashes that a Korean or
+    # Japanese Windows cannot write in its own, and the whole generate request
+    # failed on them after the map was already drawn.
+    (map_dir / "README.txt").write_text(text, encoding="utf-8")
 
 
 @app.route("/download/<map_name>.zip")
