@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1
+
+- Fixed WorldEd refusing a map with "error reading world, invalid cell
+  coordinates": a railing on a bridge along the map's bottom or right edge
+  stood in a cell past the edge. Nothing in the project can name such a cell
+  now. Maps made before this need **Build** again, then **Compile**.
+
 ## 1.2
 
 - A proper error log: logs/knoxmap.log with a description of the PC, every step

@@ -202,6 +202,18 @@ def main(argv: list[str]) -> int:
             build(out, settings=Settings(seed=1))
         rows = open(os.path.join(out, "selftest_placements.csv"), encoding="utf-8").read().splitlines()
         check(len(rows) - 1 >= 60, f"buildings placed ({len(rows) - 1})")
+        pzw_text = open(os.path.join(out, "selftest.pzw"), encoding="utf-8").read()
+        size = re.search(r'<world version="[^"]*" width="(\d+)" height="(\d+)"', pzw_text)
+        cells = [(int(a), int(b)) for a, b in re.findall(r'<cell x="(\d+)" y="(\d+)"', pzw_text)]
+        check(size and all(x < int(size.group(1)) and y < int(size.group(2)) for x, y in cells),
+              "every cell in the WorldEd project is inside the world")
+        from knoxbuild.world import Placement, Zone, render_pzw
+        edge = render_pzw(2, 2, "m.bmp", [Placement("a.tbx", 10, 599, 3, 3),
+                                          Placement("b.tbx", 10, 600, 3, 3)], "m",
+                          zones=[Zone("TownZone", 5, 650, 4, 4)])
+        check(set(re.findall(r'<cell x="(\d+)" y="(\d+)"', edge)) ==
+              {("0", "0"), ("0", "1"), ("1", "0"), ("1", "1")} and edge.count("<lot ") == 1,
+              "a lot or zone past the map's edge never names a cell outside the world")
         tbx = [os.path.join(out, "buildings", f) for f in os.listdir(os.path.join(out, "buildings"))]
         import validate_tbx
         bad = [p for p in tbx if validate_tbx.check(p)]

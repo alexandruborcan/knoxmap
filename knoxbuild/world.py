@@ -100,9 +100,15 @@ def render_pzw(cells_x: int, cells_y: int, bmp_name: str,
                placements: list[Placement], map_name: str = "",
                project_dir: str = "",
                zones: list[Zone] | None = None) -> str:
+    # Nothing may name a cell outside the world: WorldEd rejects the whole
+    # project over one ("error reading world, invalid cell coordinates").
+    def on_grid(cx: int, cy: int) -> bool:
+        return 0 <= cx < cells_x and 0 <= cy < cells_y
+
     by_cell: dict[tuple[int, int], list[Placement]] = {}
     for p in placements:
-        by_cell.setdefault((p.cell_x, p.cell_y), []).append(p)
+        if on_grid(p.cell_x, p.cell_y):
+            by_cell.setdefault((p.cell_x, p.cell_y), []).append(p)
 
     spawn_map = f"{map_name}_ZombieSpawnMap.bmp" if map_name else ""
 
@@ -167,7 +173,8 @@ def render_pzw(cells_x: int, cells_y: int, bmp_name: str,
 
     zones_by_cell: dict[tuple[int, int], list[Zone]] = {}
     for z in zones or []:
-        zones_by_cell.setdefault((z.cell_x, z.cell_y), []).append(z)
+        if on_grid(z.cell_x, z.cell_y):
+            zones_by_cell.setdefault((z.cell_x, z.cell_y), []).append(z)
 
     # Point each cell at its TMX when that file already exists.
     #

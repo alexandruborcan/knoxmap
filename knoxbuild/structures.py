@@ -25,10 +25,22 @@ def build_structures(out_dir: str, map_name: str, bdir: str) -> tuple[list, dict
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     rows = data.get("tiles") or []
+    try:
+        with open(os.path.join(out_dir, f"{map_name}_info.json"), encoding="utf-8") as f:
+            info = json.load(f)
+        width, height = info["width_tiles"], info["height_tiles"]
+    except (OSError, ValueError, KeyError):
+        width = height = None
 
     by_cell: dict[tuple[int, int], list] = {}
     for x, y, z, layer, tile in rows:
+        # Only what lies on the map. A railing along the far edge of a bridge
+        # at the map's bottom row stood on the tile below it - in a cell the
+        # map does not have, and WorldEd refused the whole project: "error
+        # reading world, invalid cell coordinates".
         if x < 0 or y < 0 or z < 0:
+            continue
+        if width is not None and (x >= width or y >= height):
             continue
         by_cell.setdefault((x // CELL, y // CELL), []).append((x, y, z, layer, tile))
 
