@@ -143,6 +143,31 @@ def api_report_save():
     return jsonify({"name": path.name, "path": str(path)})
 
 
+@app.route("/api/update")
+def api_update():
+    """Whether a newer KnoxMap is downloading or ready (updater.py)."""
+    import updater
+    return jsonify(updater.status())
+
+
+@app.route("/api/update/check", methods=["POST"])
+def api_update_check():
+    import updater
+    threading.Thread(target=updater.check, name="update-check", daemon=True).start()
+    return jsonify(updater.status())
+
+
+@app.route("/api/update/restart", methods=["POST"])
+def api_update_restart():
+    import updater
+    if os.environ.get("KNOXMAP_WINDOW") != "1":
+        return failed("Close KnoxMap and open it again to update.", 400)
+    if updater.status().get("state") != "ready":
+        return failed("No update is ready yet.", 409)
+    updater.restart()
+    return jsonify({"restarting": True})
+
+
 @app.route("/api/open-logs", methods=["POST"])
 def api_open_logs():
     return jsonify({"opened": knoxlog.open_folder(), "folder": str(knoxlog.LOG_DIR)})

@@ -42,3 +42,7 @@ cache/
 
 # Logs and problem reports (knoxlog.py)
 logs/
+
+# Downloaded updates (updater.py)
+update/
+.knoxmap_files.json

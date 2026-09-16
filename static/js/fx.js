@@ -232,7 +232,42 @@ const fx = (() => {
     });
   }
 
+  // ---- updates ------------------------------------------------------------
+  // updater.py downloads a newer release in the background; once it is
+  // ready the header offers a restart, which installs it.
+  async function watchUpdates() {
+    const box = $('#updateNote');
+    if (!box) return;
+    let st;
+    try { st = await (await fetch('/api/update')).json(); } catch (_) { return; }
+    if (st.state === 'ready') {
+      box.hidden = false;
+      box.innerHTML = '<span></span> <button type="button">Restart to update</button>';
+      box.querySelector('span').textContent = `KnoxMap ${st.latest} is ready.`;
+      box.querySelector('button').addEventListener('click', async (e) => {
+        e.target.disabled = true;
+        e.target.textContent = 'Restarting...';
+        try {
+          const res = await fetch('/api/update/restart', { method: 'POST' });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        } catch (err) {
+          e.target.disabled = false;
+          e.target.textContent = 'Restart to update';
+          toast('bad', 'Could not restart', err.message, 8000);
+        }
+      });
+      return;
+    }
+    if (st.state === 'downloading') {
+      box.hidden = false;
+      box.textContent = `Downloading KnoxMap ${st.latest}...`;
+    }
+    setTimeout(watchUpdates, st.state === 'downloading' ? 5000 : 10 * 60 * 1000);
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(watchUpdates, 8000);
     presetCards();
     $('.hint-close')?.addEventListener('click', () => $('#map-hint')?.remove());
     $('#reportLink')?.addEventListener('click', e => { e.preventDefault(); saveReport(); });

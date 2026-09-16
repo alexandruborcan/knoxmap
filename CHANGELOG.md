@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3
+
+- KnoxMap updates itself: a new release downloads in the background, is checked
+  against GitHub's fingerprint, and installs on restart, keeping your maps,
+  logs, settings, Python and map tools. Setup and the Python packages are
+  brought up to date only when a release changes them, and a map compiler
+  setup installed is replaced when a release ships a new one. From 1.2.1 or
+  earlier, download 1.3 by hand once; after that it is automatic.
+
 ## 1.2.1
 
 - Fixed WorldEd refusing a map with "error reading world, invalid cell

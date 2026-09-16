@@ -184,6 +184,10 @@ second without rebuilding, then compile again so the game sees the change.
   city centres come out best; rural areas often lack buildings entirely.
 - **Where maps go.** Installed maps are copied into `%USERPROFILE%\Zomboid\mods`.
   Project files stay in KnoxMap's `output\` folder.
+- **KnoxMap updates itself.** When a new version is released, it downloads in
+  the background and the top of the window says **Restart to update**; closing
+  and opening KnoxMap installs it too. Your maps, logs and settings are kept.
+  To turn it off, add `"auto_update": false` to `knoxmap_config.json`.
 
 ## Compatibility
 

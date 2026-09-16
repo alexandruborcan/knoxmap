@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import io
+import os
 import shutil
 import subprocess
 import sys
@@ -117,8 +118,17 @@ def ensure_patched_cli(tools: Path) -> bool:
     step(2, "Patched map compiler (PZWorldEd_cli.exe)")
     exe = tools / "bin" / "PZWorldEd_cli.exe"
     if exe.exists():
-        say(f"      found ({'verified' if sha256(exe) == CLI_SHA256 else 'custom build'})")
-        return True
+        have = sha256(exe)
+        previous = knoxpaths.load_config().get("cli_sha256")
+        # A compiler this setup installed, from an older release, is replaced
+        # by the new one; one somebody built themselves is left alone.
+        if have != CLI_SHA256 and have == previous:
+            say("      a newer compiler is available - updating")
+        else:
+            say(f"      found ({'verified' if have == CLI_SHA256 else 'custom build'})")
+            if have == CLI_SHA256 and previous != CLI_SHA256:
+                knoxpaths.save_config({"cli_sha256": CLI_SHA256})
+            return True
     try:
         data = download(CLI_URL, "the patched compiler (~6 MB)")
     except Exception as exc:     # noqa: BLE001 - any failure means "build it yourself"
@@ -130,6 +140,7 @@ def ensure_patched_cli(tools: Path) -> bool:
         say("      the download does not match the expected fingerprint - not installed.")
         return False
     exe.write_bytes(data)
+    knoxpaths.save_config({"cli_sha256": CLI_SHA256})
     say("      installed and verified")
     return True
 
@@ -155,6 +166,10 @@ def find_game() -> Path | None:
         _warn_if_not_build42(game)
         return game
     say("      Could not find Project Zomboid in your Steam libraries.")
+    if os.environ.get("KNOXMAP_UNATTENDED") == "1":
+        # Run by the updater, with nobody to answer: keep the folder set before.
+        saved = knoxpaths.load_config().get("pz_install")
+        return Path(saved) if saved else None
     while True:
         answer = input("      Paste the ProjectZomboid folder path (or press Enter to skip): ").strip().strip('"')
         if not answer:

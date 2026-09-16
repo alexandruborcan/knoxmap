@@ -16,6 +16,7 @@ Run it with:  pythonw knoxmap.py      (or double-click KnoxMap.bat)
 """
 from __future__ import annotations
 
+import os
 import socket
 import sys
 import threading
@@ -57,6 +58,13 @@ def wait_for(port: int, timeout: float = 20.0) -> bool:
 def main() -> int:
     import knoxlog
     knoxlog.setup("window")
+    import updater
+    # A downloaded update goes in before any of KnoxMap's code is loaded, and
+    # the new version starts in a fresh process.
+    if updater.apply_staged():
+        updater.relaunch()
+        return 0
+    os.environ["KNOXMAP_WINDOW"] = "1"
     import webview
 
     import app  # noqa: F401 - fail here, where it can be reported, not in the thread
@@ -65,6 +73,7 @@ def main() -> int:
     threading.Thread(target=serve, args=(port,), daemon=True).start()
     if not wait_for(port):
         raise RuntimeError("the local server did not start within 20 seconds")
+    updater.check_in_background()
 
     # Painted the page's own near-black before anything loads, so the window
     # does not flash white for the second it takes Flask to answer.

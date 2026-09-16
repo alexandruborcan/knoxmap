@@ -137,6 +137,60 @@ class Checks:
             self.failed += 1
 
 
+def check_updater(check, work: str) -> None:
+    """An update applied to a pretend install: new and changed files go in,
+    dropped files go, and maps, logs and the Python environment are left alone."""
+    import zipfile
+
+    import updater
+
+    base = Path(work) / "install"
+    (base / "output" / "mytown").mkdir(parents=True)
+    (base / "output" / "mytown" / "mytown.bmp").write_text("map")
+    (base / ".venv").mkdir()
+    (base / ".venv" / "keep.txt").write_text("env")
+    (base / "knoxmap.py").write_text("old")
+    (base / "dropped.py").write_text("gone in the new version")
+    (base / "requirements.txt").write_text("flask")
+    (base / "knoxmap_setup.py").write_text("setup")
+    (base / updater.MANIFEST.name).write_text(json.dumps(
+        {"version": "1.0", "files": ["knoxmap.py", "dropped.py", "requirements.txt",
+                                     "knoxmap_setup.py"]}))
+    update_dir = base / "update"
+    update_dir.mkdir()
+    zip_path = update_dir / "KnoxMap-v9.9.zip"
+    with zipfile.ZipFile(zip_path, "w") as z:
+        z.writestr("KnoxMap/knoxmap.py", "new")
+        z.writestr("KnoxMap/requirements.txt", "flask")
+        z.writestr("KnoxMap/knoxmap_setup.py", "setup")
+        z.writestr("KnoxMap/added/module.py", "added")
+        z.writestr("KnoxMap/output/mytown/mytown.bmp", "a release must not overwrite maps")
+        z.writestr("KnoxMap/../escape.txt", "outside the folder")
+    saved = {k: getattr(updater, k) for k in ("BASE_DIR", "UPDATE_DIR", "STAGED", "MANIFEST",
+                                              "current_version", "enabled")}
+    try:
+        updater.BASE_DIR, updater.UPDATE_DIR = base, update_dir
+        updater.STAGED, updater.MANIFEST = update_dir / "staged.json", base / saved["MANIFEST"].name
+        updater.current_version = lambda: "1.0"
+        updater.enabled = lambda: True
+        updater.STAGED.write_text(json.dumps({"version": "9.9", "zip": str(zip_path)}))
+        applied = updater.apply_staged()
+        check(applied and (base / "knoxmap.py").read_text() == "new"
+              and (base / "added" / "module.py").exists() and not (base / "dropped.py").exists(),
+              "an update puts in the new files and takes out the dropped ones")
+        check((base / "output" / "mytown" / "mytown.bmp").read_text() == "map"
+              and (base / ".venv" / "keep.txt").exists()
+              and not (Path(work) / "escape.txt").exists(),
+              "an update leaves maps and the Python environment alone and stays in its folder")
+        check(not updater.STAGED.exists() and not zip_path.exists() and not updater.apply_staged(),
+              "an update is applied once")
+        check(updater.is_newer("1.10", "1.9") and not updater.is_newer("1.2", "1.2.0")
+              and updater.is_newer("1.2.1", "1.2"), "versions compare as numbers")
+    finally:
+        for k, v in saved.items():
+            setattr(updater, k, v)
+
+
 def main(argv: list[str]) -> int:
     keep = "--keep" in argv
     check = Checks()
@@ -308,6 +362,9 @@ def main(argv: list[str]) -> int:
         # Scripts, images and stylesheets only; a plain <a> link loads nothing.
         check(not re.search(r'(?:src="|<link[^>]*href=")https?://', page.get_data(as_text=True)),
               "page loads nothing from other sites")
+
+        print("updates")
+        check_updater(check, work)
 
         print("error log")
         import zipfile
