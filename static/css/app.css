@@ -278,3 +278,11 @@ input[readonly] { background: var(--bg); color: var(--muted); }
 .leaflet-control-attribution { background: rgba(21,23,20,.8) !important; color: var(--faint); }
 .leaflet-control-attribution a { color: var(--muted); }
 .leaflet-container { background: #1b1d19; }
+
+/* An error with its id and what to do about it */
+.toast.problem { cursor: default; max-width: 360px; }
+.toast .eid { margin-top: 4px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.toast-actions { display: flex; gap: 6px; margin-top: 8px; }
+.toast-actions button { font: inherit; font-size: 12px; color: var(--text); background: var(--field);
+  border: 1px solid var(--line-strong); border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+.toast-actions button:hover { background: var(--hover); }

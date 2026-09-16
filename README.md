@@ -224,16 +224,30 @@ playing. Help is very welcome here, especially screenshots from the game.
 
 | Problem | Fix |
 |---|---|
-| `Python 3.10 or newer is needed` | Install Python from python.org with *Add to PATH* ticked, then run `Setup.bat`. |
+| Setup fails | The whole run is written to `logs/setup.log`. Run `Setup.bat` again; if it fails the same way, post that file. |
 | Setup cannot find Project Zomboid | It asks for the folder: paste the `ProjectZomboid` folder from your Steam library. |
 | Setup says the game looks like Build 41 | In Steam: right-click Project Zomboid → **Properties → Betas** → pick the Build 42 branch, then run `Setup.bat` again. |
 | *OSM query failed* | The free OpenStreetMap servers are busy. Wait a minute and try again, or choose a smaller area. |
 | The map is not in the game | Enable it under **Mods**, then start a **new** game. |
 | The window is blank | Install the [Microsoft Edge WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (built into Windows 11). |
-| KnoxMap closes straight away | It shows a message and writes `knoxmap_error.log` in the KnoxMap folder. Running `Setup.bat` again fixes most causes. |
+| KnoxMap closes straight away | It shows a message and writes the error to `logs/knoxmap.log`. Running `Setup.bat` again fixes most causes. |
 
-Found a bug, or a place that comes out wrong? [Open an issue](../../issues/new/choose),
-with screenshots if you can.
+### Reporting a problem
+
+Everything KnoxMap does is written to the `logs` folder: `knoxmap.log` for the
+app (with a short description of your PC at the top of each run), `setup.log`
+for Setup, and `worlded/` for the map compiler's own output.
+
+When something fails, the message in the app carries an id such as
+**E-7F3A2C**, the same id that sits beside the full error in the log.
+
+1. Click **Save report** on the error, or **report a problem** at the top of
+   the window. It saves `KnoxMap-report-….zip` into `logs` and shows it in
+   Explorer. The zip holds the logs and the settings of your last few maps;
+   your Windows user name is taken out of every path.
+2. Post the zip, the error id and a screenshot in **#bug-reports** on the
+   [Discord](https://discord.gg/ePM8dSxPm7), or
+   [open an issue](../../issues/new/choose).
 
 ## For tinkerers
 

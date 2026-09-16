@@ -141,6 +141,7 @@ def main(argv: list[str]) -> int:
     keep = "--keep" in argv
     check = Checks()
     work = tempfile.mkdtemp(prefix="knoxmap-selftest-")
+    os.environ["KNOXMAP_LOG_DIR"] = os.path.join(work, "logs")
     try:
         from generator import renderer
         from knoxbuild.build import build
@@ -295,6 +296,39 @@ def main(argv: list[str]) -> int:
         # Scripts, images and stylesheets only; a plain <a> link loads nothing.
         check(not re.search(r'(?:src="|<link[^>]*href=")https?://', page.get_data(as_text=True)),
               "page loads nothing from other sites")
+
+        print("error log")
+        import zipfile
+
+        import knoxlog
+
+        def _boom():
+            raise ValueError("selftest boom")
+        real = knoxmap_app.app.view_functions["api_lots"]
+        knoxmap_app.app.view_functions["api_lots"] = _boom
+        try:
+            reply = client.get("/api/lots?map=x")
+        finally:
+            knoxmap_app.app.view_functions["api_lots"] = real
+        body = reply.get_json(silent=True) or {}
+        logged = open(knoxlog.MAIN_LOG, encoding="utf-8").read() if knoxlog.MAIN_LOG.exists() else ""
+        check(reply.status_code == 500 and reply.is_json and str(body.get("errorId", "")).startswith("E-")
+              and body["errorId"] in logged and "ValueError: selftest boom" in logged,
+              "a crash comes back as JSON with an id that finds its traceback in the log")
+        refused = client.post("/api/buildings", json={"mapName": "no such map"}).get_json() or {}
+        logged = open(knoxlog.MAIN_LOG, encoding="utf-8").read()
+        check(refused.get("errorId", "-") in logged, "refusals are logged with their id too")
+        client.post("/api/client-error", json={"message": "selftest page error", "where": "x.js:1:1"})
+        check("selftest page error" in open(knoxlog.MAIN_LOG, encoding="utf-8").read(),
+              "errors in the page reach the log")
+        report = client.get("/api/report")
+        names = zipfile.ZipFile(io.BytesIO(report.data)).namelist() if report.status_code == 200 else []
+        check("system.txt" in names and "logs/knoxmap.log" in names,
+              f"the problem report holds the log and a description of the PC ({len(names)} files)")
+        home = str(Path.home())
+        check(home not in knoxlog.redact(os.path.join(home, "KnoxMap", "x.log"))
+              and "<home>" in knoxlog.redact(home),
+              "the report leaves the user's name out of paths")
 
         print("install")
         lots = os.path.join(out, "lots")

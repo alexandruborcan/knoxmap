@@ -24,6 +24,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
+import knoxlog  # noqa: E402
 import knoxpaths  # noqa: E402
 
 DEFAULT_EXE = knoxpaths.worlded_cli() or Path("PZWorldEd_cli.exe")
@@ -146,8 +147,17 @@ def compile_map(project_dir: str, batch: int = 4, exe: str | None = None,
         y1 = min(by + batch - 1, h - 1)
         cmd = [str(exe_path), f"--generate-map={pzw}",
                f"--cells={bx},{by},{x1},{y1}"]
-        proc = subprocess.run(cmd, capture_output=True, text=True,
-                              timeout=2 * 3600)
+        batch_started = time.time()
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=2 * 3600)
+        # WorldEd's own account of the batch, kept whatever happened: when it
+        # crashes this is the only record of how far it got.
+        saved = knoxlog.save_tool_output("PZWorldEd_cli", project.name,
+                                         f"cells_{bx}_{by}-{x1}_{y1}", proc.returncode,
+                                         proc.stdout, proc.stderr)
+        knoxlog.log.info("compile %s: batch %d/%d cells %d,%d..%d,%d exit %d (%s) in %.0fs",
+                         project.name, i, len(batches), bx, by, x1, y1, proc.returncode,
+                         knoxlog.explain_exit(proc.returncode), time.time() - batch_started)
         assign_converted_maps(pzw)
         cells = len(list(lots.glob("*.lotheader")))
         if on_progress:
@@ -160,9 +170,15 @@ def compile_map(project_dir: str, batch: int = 4, exe: str | None = None,
         # It now waits for the lot manager's own completion, so 65 means a
         # genuine stall or timeout and the batch's cells cannot be trusted.
         if proc.returncode != 0:
-            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
-            raise RuntimeError(f"batch {bx},{by} failed "
-                               f"({proc.returncode}): {' | '.join(tail)}")
+            lines = (proc.stderr or proc.stdout or "").strip().splitlines()
+            # The lines that say what went wrong, rather than the last three,
+            # which after a crash are usually thread shutdown chatter.
+            said = [ln for ln in lines if re.search(r"CRITICAL|ERROR|FATAL|Could not|failed", ln)]
+            tail = (said or lines)[-3:]
+            where = f" - WorldEd's output is in logs/worlded/{saved.name}" if saved else ""
+            raise RuntimeError(f"WorldEd {knoxlog.explain_exit(proc.returncode)} on cells "
+                               f"{bx},{by}..{x1},{y1} (exit {proc.returncode}): "
+                               f"{' | '.join(tail)}{where}")
     return len(list(lots.glob("*.lotheader")))
 
 

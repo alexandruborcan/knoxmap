@@ -28,6 +28,45 @@ const fx = (() => {
     setTimeout(kill, ms);
   }
 
+  // An error worth reporting: the message, its id in the log, and two ways to
+  // pass it on - the details copied for a Discord message, or the whole
+  // report zip saved into the logs folder and shown in Explorer.
+  function problem(title, msg, errorId) {
+    const box = $('#toasts');
+    if (!box) return;
+    const el = document.createElement('div');
+    el.className = 'toast bad problem';
+    el.innerHTML = '<b></b> <span class="msg"></span><div class="eid"></div>'
+      + '<div class="toast-actions"><button type="button" class="copy">Copy details</button>'
+      + '<button type="button" class="report">Save report</button>'
+      + '<button type="button" class="dismiss">Dismiss</button></div>';
+    el.querySelector('b').textContent = title;
+    el.querySelector('.msg').textContent = msg || '';
+    el.querySelector('.eid').textContent = errorId ? `Error ${errorId}` : '';
+    el.querySelector('.dismiss').addEventListener('click', () => el.remove());
+    el.querySelector('.copy').addEventListener('click', async (e) => {
+      const text = [`KnoxMap: ${title}`, msg || '', errorId || ''].filter(Boolean).join('\n');
+      try { await navigator.clipboard.writeText(text); e.target.textContent = 'Copied'; }
+      catch (_) { e.target.textContent = 'Could not copy'; }
+    });
+    el.querySelector('.report').addEventListener('click', saveReport);
+    box.appendChild(el);
+  }
+
+  async function saveReport() {
+    try {
+      const res = await fetch('/api/report-save', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      toast('ok', 'Report saved',
+            `${data.name} is in KnoxMap's logs folder. Post it in #bug-reports on the Discord.`,
+            15000);
+    } catch (_) {
+      // In a plain browser rather than the app window: download it instead.
+      window.location.href = '/api/report';
+    }
+  }
+
   // ---- numbers ------------------------------------------------------------
   function countUp(root = document) {
     root.querySelectorAll('[data-count]').forEach(el => {
@@ -196,9 +235,10 @@ const fx = (() => {
   document.addEventListener('DOMContentLoaded', () => {
     presetCards();
     $('.hint-close')?.addEventListener('click', () => $('#map-hint')?.remove());
+    $('#reportLink')?.addEventListener('click', e => { e.preventDefault(); saveReport(); });
   });
   window.addEventListener('load', mapExtras);
 
-  return { step, resetFrom, toast, countUp, tile, overlay, noted, card, progress,
+  return { step, resetFrom, toast, problem, saveReport, countUp, tile, overlay, noted, card, progress,
            confetti() {}, wireSettings, paintRange };
 })();

@@ -55,6 +55,8 @@ def wait_for(port: int, timeout: float = 20.0) -> bool:
 
 
 def main() -> int:
+    import knoxlog
+    knoxlog.setup("window")
     import webview
 
     import app  # noqa: F401 - fail here, where it can be reported, not in the thread
@@ -80,11 +82,19 @@ def report_crash() -> None:
     """
     import traceback
 
-    log = BASE_DIR / "knoxmap_error.log"
-    log.write_text(traceback.format_exc(), encoding="utf-8")
+    where = BASE_DIR / "logs" / "knoxmap.log"
+    try:
+        import knoxlog
+        knoxlog.setup("window")
+        eid = " as " + knoxlog.record(sys.exc_info()[1], "KnoxMap could not start")
+    except Exception:  # noqa: BLE001 - the logger itself may be what broke
+        eid = ""
+        where = BASE_DIR / "knoxmap_error.log"
+        where.write_text(traceback.format_exc(), encoding="utf-8")
     text = (f"KnoxMap could not start:\n\n{sys.exc_info()[1]}\n\n"
-            f"Details were saved to {log}.\n"
-            "Running Setup.bat again fixes most problems.")
+            f"Details were saved to {where}{eid}.\n"
+            "Running Setup.bat again fixes most problems. If it does not, post "
+            "that file in #bug-reports on the KnoxMap Discord.")
     try:
         import ctypes
         ctypes.windll.user32.MessageBoxW(None, text, "KnoxMap", 0x10)

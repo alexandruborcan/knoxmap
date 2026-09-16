@@ -39,3 +39,6 @@ cache/
 # A private Python that Setup.bat downloads when the PC has none
 .python/
 .python.zip
+
+# Logs and problem reports (knoxlog.py)
+logs/

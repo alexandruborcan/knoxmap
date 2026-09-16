@@ -301,5 +301,57 @@ def main() -> int:
     return 0
 
 
+class _Tee:
+    """Everything setup prints, also written to logs/setup.log: a setup that
+    failed on someone else's PC left nothing behind but a closed window."""
+
+    def __init__(self, stream, log):
+        self.stream, self.log = stream, log
+
+    def write(self, text):
+        if self.stream is not None:
+            self.stream.write(text)
+        self.log.write(text)
+        self.log.flush()
+
+    def flush(self):
+        if self.stream is not None:
+            self.stream.flush()
+
+    def reconfigure(self, **kw):
+        if self.stream is not None and hasattr(self.stream, "reconfigure"):
+            self.stream.reconfigure(**kw)
+
+
+def _log_to_file() -> None:
+    import time
+
+    logs = Path(__file__).resolve().parent / "logs"
+    try:
+        logs.mkdir(exist_ok=True)
+        setup_log = open(logs / "setup.log", "a", encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    setup_log.write(f"\n===== setup {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
+    try:
+        import knoxlog
+        setup_log.write(knoxlog.system_summary() + "\n\n")
+    except Exception:  # noqa: BLE001 - the summary is a nicety
+        pass
+    sys.stdout = _Tee(sys.stdout, setup_log)
+    sys.stderr = _Tee(sys.stderr, setup_log)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import traceback
+
+    _log_to_file()
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except BaseException:  # noqa: BLE001
+        traceback.print_exc()
+        print("\nSetup failed. The details are in logs/setup.log - post that file in "
+              "#bug-reports on the KnoxMap Discord if running Setup.bat again does not help.")
+        raise SystemExit(1)

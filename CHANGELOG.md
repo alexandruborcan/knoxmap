@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2
+
+- A proper error log: logs/knoxmap.log with a description of the PC, every step
+  and every error in full; an id on each error in the app; WorldEd's output
+  from every compile; a setup log; and a report zip to post in #bug-reports.
+- The README's screenshot shows the current window.
+
 ## 1.1
 
 **Fixes from the Discord**

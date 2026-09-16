@@ -12,6 +12,37 @@ const MAX_LANDMARK_KM2 = 40.0;
 const OVERPASS_TILE_KM2 = 30.0;
 const SLOW_ABOVE_KM2 = 60.0;
 
+// ---- errors -------------------------------------------------------------
+// Every failure the server answers with carries an id (E-7F3A2C) that is also
+// in logs/knoxmap.log beside the full error; the page shows it, so a bug
+// report can point straight at the line. See knoxlog.py.
+let lastErrorId = null;
+
+function apiError(data, res) {
+  const err = new Error((data && data.error) || `HTTP ${res.status}`);
+  err.errorId = data && data.errorId;
+  lastErrorId = err.errorId || null;
+  return err;
+}
+
+// Errors in this page's own code, which otherwise vanish inside the app
+// window where there is no console to see them.
+function sendPageError(message, where, stack) {
+  try {
+    fetch('/api/client-error', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: String(message).slice(0, 500),
+                             where: String(where || '').slice(0, 300),
+                             stack: String(stack || '').slice(0, 4000) }),
+    }).catch(() => {});
+  } catch (_) { /* nothing more to do */ }
+}
+window.addEventListener('error', e =>
+  sendPageError(e.message, `${e.filename}:${e.lineno}:${e.colno}`, e.error && e.error.stack));
+window.addEventListener('unhandledrejection', e =>
+  sendPageError((e.reason && e.reason.message) || e.reason, 'unhandled promise',
+                e.reason && e.reason.stack));
+
 const map = L.map('map', { zoomControl: true }).setView([38.0406, -84.5037], 14);
 // Tiles through KnoxMap's own server, which follows the OSM tile policy -
 // see the /tiles route in app.py.
@@ -425,7 +456,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
       body: JSON.stringify(body),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (!res.ok) throw apiError(data, res);
 
     status.className = 'success';
     status.textContent = `Done in ${data.osmSeconds}s (OSM query). ${data.featureCount} features rendered.`;
@@ -439,7 +470,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
     status.textContent = `Error: ${err.message}`;
     fx.overlay.fail(err.message);
     fx.step('terrain', 'error');
-    fx.toast('bad', 'Generation failed', err.message, 12000);
+    fx.problem('Generation failed', err.message, err.errorId);
   } finally {
     stopProgress();
     btn.disabled = false;
@@ -639,7 +670,7 @@ async function runSearch(q) {
   try {
     const res = await fetch('/api/search?' + params.toString());
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (!res.ok) throw apiError(data, res);
     renderSearchResults(data.results);
   } catch (err) {
     searchResults.innerHTML = `<li class="empty">${escapeHtml(err.message)}</li>`;
@@ -678,7 +709,7 @@ document.getElementById('landmarksBtn').addEventListener('click', async () => {
       }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (!res.ok) throw apiError(data, res);
     renderLandmarks(data.landmarks);
   } catch (err) {
     out.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
@@ -744,6 +775,13 @@ function note(id, text, cls) {
   el.textContent = text;
   el.className = 'step-note' + (cls ? ' ' + cls : '');
   fx.noted(id, text, cls);
+  if (cls === 'bad') {
+    const what = { buildingsNote: 'Building failed', compileNote: 'Compile failed',
+                   worldedNote: 'WorldEd failed', installNote: 'Install failed',
+                   censusNote: 'Recount failed' }[id] || 'Something went wrong';
+    fx.problem(what, text, lastErrorId);
+    lastErrorId = null;
+  }
 }
 
 function setupPipeline(data) {
@@ -777,7 +815,7 @@ document.getElementById('buildingsBtn').addEventListener('click', async () => {
       body: JSON.stringify({ mapName: currentMap, settings: readSettings() }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (!res.ok) throw apiError(data, res);
     note('buildingsNote', `${data.count} buildings → ${data.pzw}`, 'ok');
     renderCensus(data.population);
     document.getElementById('worldedBtn').disabled = false;
@@ -797,7 +835,7 @@ document.getElementById('worldedBtn').addEventListener('click', async () => {
       body: JSON.stringify({ mapName: currentMap }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (!res.ok) throw apiError(data, res);
     note('worldedNote', 'WorldEd opened. File > BMP To TMX > All Cells…, then '
                         + 'File > Generate Lots 8x8 > All Cells… — waiting…');
     startLotsPoll();
@@ -839,7 +877,7 @@ document.getElementById('installBtn').addEventListener('click', async () => {
       }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (!res.ok) throw apiError(data, res);
     let lifts = '';
     try {
       const status = await (await fetch('/api/setup-status')).json();
@@ -896,7 +934,7 @@ document.getElementById('recountBtn').addEventListener('click', async () => {
       body: JSON.stringify({ mapName: currentMap, settings: readSettings() }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (!res.ok) throw apiError(data, res);
     renderCensus(data.population);
     const censusNote = document.getElementById('censusNote');
     censusNote.textContent = 'Recounted. Compile the map again so the game sees the new zombies.';
@@ -930,7 +968,7 @@ document.getElementById('compileBtn').addEventListener('click', async () => {
       body: JSON.stringify({ mapName: currentMap }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (!res.ok) throw apiError(data, res);
     pollCompile();
   } catch (err) {
     note('compileNote', err.message, 'bad');
@@ -964,6 +1002,7 @@ function pollCompile() {
       clearInterval(compileTimer);
       document.getElementById('compileBtn').disabled = false;
       if (p.state === 'error') {
+        lastErrorId = p.errorId || null;
         note('compileNote', p.error || 'Compile failed.', 'bad');
         return;
       }

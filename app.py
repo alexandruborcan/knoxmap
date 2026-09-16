@@ -23,6 +23,7 @@ from pathlib import Path
 from flask import (Flask, jsonify, render_template, request, send_file,
                    send_from_directory)
 
+import knoxlog
 from generator import osm, places, renderer
 from knoxbuild.settings import PRESETS, Settings
 
@@ -46,33 +47,105 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
 
 
-ERROR_LOG = BASE_DIR / "knoxmap_error.log"
+log = knoxlog.setup("app")
+
+
+def _request_context() -> dict:
+    """What the page asked for, for the log: the map, the area and the
+    settings, never more than a few hundred characters."""
+    body = request.get_json(silent=True) if request.is_json else None
+    if not isinstance(body, dict):
+        return {}
+    keep = ("mapName", "south", "west", "north", "east", "metersPerTile", "title", "modId")
+    ctx = {k: body[k] for k in keep if k in body}
+    if isinstance(body.get("settings"), dict):
+        ctx["settings"] = body["settings"]
+    if body.get("shape"):
+        ctx["shape"] = "drawn"
+    return ctx
+
+
+def failed(message: str, status: int = 500, exc: BaseException | None = None):
+    """An error reply the page shows, logged with an id the user can quote."""
+    eid = knoxlog.record(exc, f"{request.method} {request.path} -> {status}: {message}",
+                         **_request_context())
+    return jsonify({"error": message, "errorId": eid}), status
 
 
 @app.errorhandler(Exception)
 def _api_error(exc):
-    """Every failure as JSON the page can show, with the details in a log.
+    """Every failure as JSON the page can show, with the details in the log.
 
     Flask's default answer to an exception is an HTML page. The page reads
     every reply as JSON, so a crash anywhere in a request showed only
     "Unexpected token '<', "<!doctype"... is not valid JSON", which says
     nothing about what went wrong or where.
     """
-    import traceback
     from werkzeug.exceptions import HTTPException
 
     if isinstance(exc, HTTPException):
         if not request.path.startswith("/api/"):
             return exc
         return jsonify({"error": f"{exc.code} {exc.name}"}), exc.code
+    return failed(f"{type(exc).__name__}: {exc}", 500, exc)
+
+
+@app.after_request
+def _log_refusals(response):
+    """Every error the API answers with goes in the log, not just crashes: a
+    "Missing or invalid bbox" is as much a clue as a traceback."""
+    if (request.path.startswith("/api/") and response.status_code >= 400
+            and response.is_json):
+        data = response.get_json(silent=True) or {}
+        if not data.get("errorId"):
+            eid = knoxlog.record(None, f"{request.method} {request.path} -> "
+                                       f"{response.status_code}: {data.get('error')}",
+                                 **_request_context())
+            data["errorId"] = eid
+            response.set_data(json.dumps(data))
+    return response
+
+
+@app.route("/api/client-error", methods=["POST"])
+def api_client_error():
+    """Errors in the page itself, sent by the script in static/js/app.js."""
+    data = request.get_json(silent=True) or {}
+    eid = knoxlog.error_id()
+    log.error("%s page error: %s\n  at %s\n%s", eid,
+              str(data.get("message", ""))[:500], str(data.get("where", ""))[:300],
+              str(data.get("stack", ""))[:4000])
+    return jsonify({"errorId": eid})
+
+
+@app.route("/api/report")
+def api_report():
+    """A zip of the logs and a description of the PC, for #bug-reports."""
+    log.info("problem report downloaded")
+    stamp = time.strftime("%Y%m%d-%H%M")
+    return send_file(io.BytesIO(knoxlog.report_zip(OUTPUT_DIR)), mimetype="application/zip",
+                     as_attachment=True, download_name=f"KnoxMap-report-{stamp}.zip")
+
+
+@app.route("/api/report-save", methods=["POST"])
+def api_report_save():
+    """The same zip, saved into logs/ and shown in Explorer: the app window is
+    not a browser, and has nowhere to put a download."""
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    path = knoxlog.LOG_DIR / f"KnoxMap-report-{stamp}.zip"
+    knoxlog.LOG_DIR.mkdir(exist_ok=True)
+    path.write_bytes(knoxlog.report_zip(OUTPUT_DIR))
+    log.info("problem report saved: %s", path.name)
     try:
-        with open(ERROR_LOG, "a", encoding="utf-8") as log:
-            log.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')} {request.method} "
-                      f"{request.path}\n{traceback.format_exc()}\n")
+        import subprocess
+        subprocess.Popen(["explorer", "/select,", str(path)])
     except OSError:
         pass
-    return jsonify({"error": f"{type(exc).__name__}: {exc} - the full error is in "
-                             f"{ERROR_LOG.name} in the KnoxMap folder"}), 500
+    return jsonify({"name": path.name, "path": str(path)})
+
+
+@app.route("/api/open-logs", methods=["POST"])
+def api_open_logs():
+    return jsonify({"opened": knoxlog.open_folder(), "folder": str(knoxlog.LOG_DIR)})
 
 
 @app.before_request
@@ -388,6 +461,8 @@ def generate():
                      f"meters-per-tile scale."}), 400
 
     t0 = time.time()
+    log.info("generate %s: %.5f,%.5f,%.5f,%.5f at %s m/tile, %.2f km2", map_name,
+             south, west, north, east, meters_per_tile, area_km2)
     map_dir = OUTPUT_DIR / map_name
     map_dir.mkdir(parents=True, exist_ok=True)
     bbox = (south, west, north, east)
@@ -428,7 +503,7 @@ def generate():
                 *fetch_box, max_tile_km2=OVERPASS_TILE_KM2, progress=_progress)
         except Exception as exc:  # Overpass can be flaky — surface that clearly
             _set_progress(map_name, stage="error", message=str(exc))
-            return jsonify({"error": f"OSM query failed: {exc}"}), 502
+            return failed(f"OSM query failed: {exc}", 502, exc)
         try:
             osm.save_cache(cache, fetch_box, features)
         except OSError:
@@ -460,6 +535,9 @@ def generate():
 
     _write_readme(map_dir, map_name, result)
     _set_progress(map_name, stage="done")
+    log.info("generate %s: done, %d features, %dx%d tiles, rotation %.1f, %.1fs "
+             "(download %.1fs)", map_name, len(features), result.width, result.height,
+             rotation, time.time() - t0, osm_time)
 
     return jsonify({
         "mapName": map_name,
@@ -520,11 +598,20 @@ def api_buildings():
         return jsonify({"error": "Unknown map."}), 404
     settings = Settings.from_dict(data.get("settings"))         if data.get("settings") else _load_settings(map_dir)
     _save_settings(map_dir, settings)
+    log.info("buildings %s: started", map_dir.name)
+    t0 = time.time()
+    out = io.StringIO()
     try:
-        build_buildings(str(map_dir), settings=settings)
+        from contextlib import redirect_stdout
+        with redirect_stdout(out):
+            build_buildings(str(map_dir), settings=settings)
     except Exception as exc:
-        return jsonify({"error": f"Building generation failed: {exc}"}), 500
+        log.info("buildings %s output before the error:\n%s", map_dir.name,
+                 out.getvalue()[-4000:])
+        return failed(f"Building generation failed: {exc}", 500, exc)
     tbx = sorted((map_dir / "buildings").glob("*.tbx"))
+    log.info("buildings %s: %d files in %.1fs\n%s", map_dir.name, len(tbx),
+             time.time() - t0, out.getvalue()[-3000:])
     return jsonify({"count": len(tbx),
                     "pzw": f"{map_dir.name}.pzw",
                     "settings": settings.to_dict(),
@@ -561,7 +648,7 @@ def api_zombies():
     try:
         summary = recount(str(map_dir), settings)
     except FileNotFoundError as exc:
-        return jsonify({"error": f"Cannot recount zombies: {exc}."}), 400
+        return failed(f"Cannot recount zombies: {exc}.", 400, exc)
     _save_settings(map_dir, settings)
     return jsonify({"population": summary})
 
@@ -784,22 +871,29 @@ def api_compile():
                 _COMPILE[name] = {"state": "running", "error": None,
                                   "batch": done, "batches": total}
 
+        log.info("compile %s: started", name)
+        t0 = time.time()
         try:
             produced = compiler.compile_map(str(map_dir), batch=COMPILE_BATCH,
                                             exe=str(exe), on_progress=note)
             if not produced:
+                eid = knoxlog.record(None, f"compile {name}: produced no cells")
                 with _PROGRESS_LOCK:
-                    _COMPILE[name] = {"state": "error",
+                    _COMPILE[name] = {"state": "error", "errorId": eid,
                                       "error": "Compile produced no cells."}
                 return
+            log.info("compile %s: %d cells in %.0fs", name, produced, time.time() - t0)
             with _PROGRESS_LOCK:
                 _COMPILE[name] = {"state": "done", "error": None}
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
+            eid = knoxlog.record(exc, f"compile {name}: timed out")
             with _PROGRESS_LOCK:
-                _COMPILE[name] = {"state": "error", "error": "Compile timed out."}
+                _COMPILE[name] = {"state": "error", "errorId": eid,
+                                  "error": "Compile timed out."}
         except Exception as exc:
+            eid = knoxlog.record(exc, f"compile {name}: failed")
             with _PROGRESS_LOCK:
-                _COMPILE[name] = {"state": "error", "error": str(exc)}
+                _COMPILE[name] = {"state": "error", "errorId": eid, "error": str(exc)}
 
     threading.Thread(target=worker, daemon=True).start()
     return jsonify({"started": True, "expected": _expected_cells(map_dir)})
@@ -836,9 +930,10 @@ def api_install():
         mod_root, n_cells, extras = make_map_mod.package(
             str(map_dir), title, mod_id)
     except FileNotFoundError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return failed(str(exc), 400, exc)
     except Exception as exc:
-        return jsonify({"error": f"Install failed: {exc}"}), 500
+        return failed(f"Install failed: {exc}", 500, exc)
+    log.info("install %s: %d cells as %s, extras %s", map_dir.name, n_cells, mod_id, extras)
     return jsonify({"modRoot": str(mod_root), "cells": n_cells,
                     "extras": extras, "modId": mod_id, "title": title})
 
