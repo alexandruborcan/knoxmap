@@ -77,7 +77,7 @@ def main() -> int:
 
     # Painted the page's own near-black before anything loads, so the window
     # does not flash white for the second it takes Flask to answer.
-    webview.create_window(TITLE, f"http://127.0.0.1:{port}/",
+    webview.create_window(f"{TITLE} ({knoxlog.version()})", f"http://127.0.0.1:{port}/",
                           width=1440, height=920, min_size=(1000, 680),
                           background_color="#07090B")
     webview.start()

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.2
+
+- The version you are running is shown at the top of the window, in its
+  title bar, and in the details an error copies for a bug report.
+
 ## 1.3.1
 
 - A map is no longer stopped by one bad entry. Before compiling, KnoxMap checks

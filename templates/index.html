@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>KnoxMap</title>
+<title>KnoxMap {{ version }}</title>
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg"/>
 <!-- The map library is bundled in static/vendor (see LICENSES.md), so the
      window works offline and contacts no third party but OpenStreetMap. -->
@@ -16,6 +16,7 @@
 <header class="topbar">
   <img src="/static/logo.svg" alt="" class="logo"/>
   <h1>KnoxMap</h1>
+  <span class="version" id="appVersion" title="The KnoxMap version you are running">v{{ version }}</span>
   <span class="byline">real places as Project Zomboid maps &middot; by euclid80tr &middot; <a href="https://discord.gg/ePM8dSxPm7" target="_blank" rel="noopener">discord</a> &middot; <a href="#" id="reportLink">report a problem</a></span>
   <span id="updateNote" class="update-note" hidden></span>
 </header>

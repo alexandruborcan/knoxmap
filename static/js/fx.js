@@ -45,7 +45,8 @@ const fx = (() => {
     el.querySelector('.eid').textContent = errorId ? `Error ${errorId}` : '';
     el.querySelector('.dismiss').addEventListener('click', () => el.remove());
     el.querySelector('.copy').addEventListener('click', async (e) => {
-      const text = [`KnoxMap: ${title}`, msg || '', errorId || ''].filter(Boolean).join('\n');
+      const version = $('#appVersion')?.textContent || '';
+      const text = [`KnoxMap ${version}: ${title}`, msg || '', errorId || ''].filter(Boolean).join('\n');
       try { await navigator.clipboard.writeText(text); e.target.textContent = 'Copied'; }
       catch (_) { e.target.textContent = 'Could not copy'; }
     });

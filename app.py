@@ -224,7 +224,7 @@ def api_progress():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", version=knoxlog.version())
 
 
 # ---- map tiles, fetched the way the OSM tile policy asks -------------------------
