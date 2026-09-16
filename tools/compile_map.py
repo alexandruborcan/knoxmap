@@ -132,6 +132,19 @@ def compile_map(project_dir: str, batch: int = 4, exe: str | None = None,
         raise FileNotFoundError(f"PZWorldEd_cli.exe not found at {exe_path}")
 
     clear_stale(project)
+    # Whatever wrote the project, one entry past the edge of the map must not
+    # stop the whole compile: WorldEd refuses a project over a single one.
+    from knoxbuild.repair import repair_project
+    try:
+        fixed = repair_project(pzw)
+    except Exception:  # noqa: BLE001 - a repair that fails leaves the project as it was
+        knoxlog.log.exception("compile %s: checking the project failed", project.name)
+    else:
+        if fixed["changed"]:
+            knoxlog.log.warning("compile %s: repaired the project before compiling - moved %d, "
+                                "dropped %d%s", project.name, fixed["moved"], len(fixed["dropped"]),
+                                "".join(f"\n  dropped {what}: {why}"
+                                        for what, why in fixed["dropped"][:50]))
     lots = project / "lots"
     lots.mkdir(exist_ok=True)
     (project / "tmx").mkdir(exist_ok=True)

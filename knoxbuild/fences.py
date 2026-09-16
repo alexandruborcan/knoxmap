@@ -226,6 +226,11 @@ def build_fences(out_dir: str, map_name: str, proj, occupied, areas,
 
     # A gate replaces the fence piece on its square, facing the same way.
     for (x, y), style in gates.items():
+        # On the map, like every other piece: a back yard's gate on the map's
+        # far edge went into a cell past it, and WorldEd would not open the
+        # project at all.
+        if not (0 <= x < map_w and 0 <= y < map_h):
+            continue
         sides = edges.get((x, y), {})
         if style in GATES and len(sides) == 1:
             pieces[(x, y)] = GATES[style][0 if "W" in sides else 1]

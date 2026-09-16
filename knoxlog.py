@@ -260,6 +260,16 @@ def report_zip(output_dir: Path | None = None, recent_maps: int = 3) -> bytes:
             z.writestr(f"logs/{path.name}", redact(_tail(path)))
         for path in sorted(WORLDED_DIR.glob("*.log"))[-10:]:
             z.writestr(f"logs/worlded/{path.name}", redact(_tail(path)))
+        # WorldEd's own logs: the one place that says why it would not open a
+        # project, which its console output does not.
+        try:
+            import knoxpaths
+            tools = knoxpaths.mapping_tools_dir()
+            if tools:
+                for path in sorted((tools / "settings" / "logs").glob("PZWorldEd-*.log"))[-5:]:
+                    z.writestr(f"logs/worlded-app/{path.name}", redact(_tail(path, 1024 * 1024)))
+        except Exception:  # noqa: BLE001 - the report goes out without them
+            pass
         old_log = BASE_DIR / "knoxmap_error.log"
         if old_log.exists():
             z.writestr("logs/knoxmap_error.log", redact(_tail(old_log)))

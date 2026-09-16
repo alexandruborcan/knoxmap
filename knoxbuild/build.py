@@ -509,17 +509,25 @@ def _party_walls(owner: np.ndarray, me: int, x0: int, y0: int, mask: np.ndarray,
     return out
 
 
-def _make_one(job: tuple) -> tuple[int, int, int]:
-    """Lay out one building and write its .tbx. Returns (storeys, rooms, furniture)."""
+def _make_one(job: tuple) -> tuple:
+    """Lay out one building and write its .tbx. Returns (storeys, rooms,
+    furniture, error): a building that cannot be laid out is left out with the
+    reason, instead of stopping the other two thousand."""
     (w, h, levels, commercial, seed, kind, mask, settings, style, label, path, street, retail,
      uses, hotel, party) = job
-    plan = build_building(w, h, levels=levels, commercial=commercial, seed=seed,
-                          kind=kind, mask=mask, settings=settings, street=street,
-                          retail=retail, uses=uses, hotel=hotel, party=party)
+    try:
+        plan = build_building(w, h, levels=levels, commercial=commercial, seed=seed,
+                              kind=kind, mask=mask, settings=settings, street=street,
+                              retail=retail, uses=uses, hotel=hotel, party=party)
+        text = render_tbx(plan, label, style)
+    except Exception:  # noqa: BLE001
+        import traceback
+        return (0, 0, 0, f"{os.path.basename(path)} ({kind or 'house'}, {w}x{h}, "
+                         f"{levels} storeys): {traceback.format_exc()}")
     with open(path, "w", encoding="utf-8") as f:
-        f.write(render_tbx(plan, label, style))
+        f.write(text)
     return (len(plan.storeys), len(plan.rooms),
-            sum(len(s.furniture) for s in plan.storeys))
+            sum(len(s.furniture) for s in plan.storeys), None)
 
 
 # Below this many buildings, starting worker processes costs more than it saves.
@@ -773,8 +781,12 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     # town comes out the same each time. What is left - laying out rooms and
     # writing the files - depends only on each building's own seed, so it runs
     # across processes: a 4,000-building district took three minutes on one.
+    failed_buildings = []
     for (fname, label, x0, y0, w, h, fp, px, special, measured, commercial,
-         style, mask, real_name), (storeys, rooms, furniture) in zip(decided, _make_all(jobs)):
+         style, mask, real_name), (storeys, rooms, furniture, error) in zip(decided, _make_all(jobs)):
+        if error:
+            failed_buildings.append(error)
+            continue
         p = Placement(f"buildings/{fname}", x0, y0, w, h)
         placements.append(p)
         peopled.append((x0, y0, fp.mask, storeys, special or "house"))
@@ -892,6 +904,16 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
         print(f"  OSM says {town['name'] or town['place']}: "
               f"population {town['population']:,} ({town['place']})")
     print(f"wrote {len(rows)} .tbx files in {bdir}")
+    if failed_buildings:
+        print(f"left out {len(failed_buildings)} buildings that could not be laid out:")
+        for error in failed_buildings[:20]:
+            print(f"  {error}")
+        try:
+            import knoxlog
+            for error in failed_buildings:
+                knoxlog.log.warning("building left out: %s", error)
+        except Exception:  # noqa: BLE001 - the printout is the record then
+            pass
     return 0
 
 

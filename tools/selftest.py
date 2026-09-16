@@ -137,6 +137,52 @@ class Checks:
             self.failed += 1
 
 
+def check_repair(check, out: str) -> None:
+    """A project broken at its edges, as older versions and hand edits leave
+    them, is repaired before compiling instead of stopping it."""
+    from knoxbuild.repair import repair_project
+
+    source = os.path.join(out, "selftest.pzw")
+    broken = os.path.join(out, "broken.pzw")
+    text = open(source, encoding="utf-8", newline="").read()
+    nl = "\r\n" if "\r\n" in text else "\n"
+    first_lot = re.search(r'map="(buildings/selftest_\d+\.tbx)"', text).group(1)
+    # Not among the buildings: the checks further on read every file there.
+    os.makedirs(os.path.join(out, "broken"), exist_ok=True)
+    with open(os.path.join(out, "broken", "broken.tbx"), "w", encoding="utf-8") as f:
+        f.write("<building version=\"4\" width=\"0\" height=\"3\"></building>")
+    extra = nl.join([
+        ' <cell x="9" y="0" map="">',                       # a whole cell past the edge
+        f'  <lot x="5" y="5" level="0" width="3" height="3" map="{first_lot}"/>',
+        " </cell>",
+        ' <cell x="0" y="0" map="">',
+        f'  <lot x="310" y="20" level="0" width="3" height="3" map="{first_lot}"/>',  # in cell 1,0 really
+        '  <lot x="20" y="20" level="0" width="3" height="3" map="buildings/missing.tbx"/>',
+        '  <lot x="30" y="20" level="0" width="3" height="3" map="broken/broken.tbx"/>',
+        '  <object name="" group="TownZone" type="TownZone" x="10" y="950" level="0" width="5" height="5"/>',
+        " </cell>",
+    ])
+    text = text.replace("</world>", extra + nl + "</world>")
+    with open(broken, "w", encoding="utf-8", newline="") as f:
+        f.write(text)
+    report = repair_project(broken)
+    fixed = open(broken, encoding="utf-8").read()
+    cells = [(int(a), int(b)) for a, b in re.findall(r'<cell x="(-?\d+)" y="(-?\d+)"', fixed)]
+    size = re.search(r'<world version="[^"]*" width="(\d+)" height="(\d+)"', fixed)
+    w, h = int(size.group(1)), int(size.group(2))
+    reasons = " ".join(why for _what, why in report["dropped"])
+    check(report["changed"] and report["moved"] == 1 and len(report["dropped"]) == 4
+          and all(0 <= x < w and 0 <= y < h for x, y in cells)
+          and len(cells) == len(set(cells))
+          and "missing.tbx" not in fixed and "broken.tbx" not in fixed
+          and "missing" in reasons and "outside" in reasons
+          and os.path.exists(broken + ".bak"),
+          f"a project broken at its edges is repaired, not refused "
+          f"(moved {report['moved']}, dropped {len(report['dropped'])})")
+    check(not repair_project(broken)["changed"] and not repair_project(source)["changed"],
+          "a sound project is left exactly as it is")
+
+
 def check_updater(check, work: str) -> None:
     """An update applied to a pretend install: new and changed files go in,
     dropped files go, and maps, logs and the Python environment are left alone."""
@@ -261,6 +307,7 @@ def main(argv: list[str]) -> int:
         cells = [(int(a), int(b)) for a, b in re.findall(r'<cell x="(\d+)" y="(\d+)"', pzw_text)]
         check(size and all(x < int(size.group(1)) and y < int(size.group(2)) for x, y in cells),
               "every cell in the WorldEd project is inside the world")
+        check_repair(check, out)
         from knoxbuild.world import Placement, Zone, render_pzw
         edge = render_pzw(2, 2, "m.bmp", [Placement("a.tbx", 10, 599, 3, 3),
                                           Placement("b.tbx", 10, 600, 3, 3)], "m",

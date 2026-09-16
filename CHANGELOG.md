@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.1
+
+- A map is no longer stopped by one bad entry. Before compiling, KnoxMap checks
+  the WorldEd project: anything past the edge of the map or its cell is moved
+  where it belongs or left out, and a building file that is missing or broken is
+  left out, all written to the log - instead of WorldEd refusing the whole map
+  ("Could not open project", "invalid cell coordinates"). Maps made with older
+  versions are repaired too, without building again.
+- One building that cannot be laid out is left out, with the reason in the
+  log, instead of stopping Build for the rest.
+- A problem report includes WorldEd's own logs.
+
 ## 1.3
 
 - KnoxMap updates itself: a new release downloads in the background, is checked
