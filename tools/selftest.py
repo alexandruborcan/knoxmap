@@ -549,6 +549,19 @@ def main(argv: list[str]) -> int:
         info = open(os.path.join(mod_root, "mod.info"), encoding="utf-8").read()
         check("OpenStreetMap" in info, "OpenStreetMap credit in the mod description")
         check("require=" not in info, "a map without mod tiles requires no mods")
+        from knoxbuild.worldmap_bin import read_bin
+        bin_map = os.path.join(mod_root, "common", "media", "maps", "Selftest Town", "worldmap.xml.bin")
+        try:
+            paper = read_bin(bin_map)
+        except (OSError, ValueError) as exc:
+            paper = {}
+            print(f"        {exc}")
+        kinds = {k for feats in paper.values() for _t, _r, props in feats for k in props}
+        check(paper and "building" in kinds
+              and all(x >= 82 for x, _y in paper)
+              and all(-32768 <= px <= 32767 for feats in paper.values()
+                      for _t, rings, _p in feats for ring in rings for px, _ in ring),
+              f"the paper map is written as Build 42's worldmap.xml.bin ({len(paper)} cells)")
         objects = os.path.join(mod_root, "common", "media", "maps", "Selftest Town", "objects.lua")
         text = open(objects, encoding="utf-8").read() if os.path.exists(objects) else ""
         check(text.startswith("objects = {") and text.count('type = "ParkingStall"') == stalls

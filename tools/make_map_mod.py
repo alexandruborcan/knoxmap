@@ -416,6 +416,14 @@ def package(project_dir: str, name: str, mod_id: str,
 
     for src in cells + extras:
         shutil.copy2(src, os.path.join(map_dir, os.path.basename(src)))
+    # The paper map in the binary form Build 42 reads; from worldmap.xml alone
+    # it shows street names and nothing else (knoxbuild/worldmap_bin.py).
+    n_map_features = 0
+    xml_map = os.path.join(map_dir, "worldmap.xml")
+    if os.path.exists(xml_map):
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from knoxbuild.worldmap_bin import write_bin
+        n_map_features = write_bin(xml_map, xml_map + ".bin")
 
     desc = description or f"{name}, generated from real-world map data with KnoxMap by euclid80tr."
     # OpenStreetMap's licence (ODbL) requires attribution wherever the map is
@@ -472,6 +480,8 @@ def package(project_dir: str, name: str, mod_id: str,
     extra_names = [os.path.basename(e) for e in extras]
     if n_spawns:
         extra_names.append(f"spawnpoints.lua ({n_spawns} spawn points)")
+    if n_map_features:
+        extra_names.append(f"worldmap.xml.bin ({n_map_features} paper map features)")
     if zone_counts:
         extra_names.append(f"objects.lua ({zone_counts.get('ParkingStall', 0)} parking stalls, "
                            f"{zone_counts.get('TownZone', 0)} town zones)")

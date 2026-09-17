@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.4
+
+- The in-game map (M) shows the roads, buildings and water, not just street
+  names. Build 42 cannot read the paper map from worldmap.xml any more - every
+  outline failed to load ("Error while parsing xml element: geometry" in
+  console.txt) - and reads the binary worldmap.xml.bin the game's own maps
+  ship instead. Install now writes it. Maps made before this only need
+  **Install** again.
+
 ## 1.3.3
 
 - Setup no longer fails when Steam still lists a library on a drive that is
