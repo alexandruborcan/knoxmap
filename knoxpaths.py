@@ -37,7 +37,7 @@ def save_config(values: dict) -> None:
 
 def _first(*candidates) -> Path | None:
     for c in candidates:
-        if c and Path(c).exists():
+        if c and _exists(Path(c)):
             return Path(c)
     return None
 
@@ -55,24 +55,72 @@ def mapping_tools_dir() -> Path | None:
 def worlded_cli() -> Path | None:
     """The patched, headless PZWorldEd_cli.exe."""
     override = os.environ.get("PZWORLDED_CLI")
-    if override and Path(override).exists():
+    if override and _exists(Path(override)):
         return Path(override)
     tools = mapping_tools_dir()
     exe = tools / "bin" / "PZWorldEd_cli.exe" if tools else None
-    return exe if exe and exe.exists() else None
+    return exe if exe and _exists(exe) else None
 
 
 def worlded_gui() -> Path | None:
     override = os.environ.get("PZWORLDED")
-    if override and Path(override).exists():
+    if override and _exists(Path(override)):
         return Path(override)
     tools = mapping_tools_dir()
     exe = tools / "bin" / "PZWorldEd.exe" if tools else None
-    return exe if exe and exe.exists() else None
+    return exe if exe and _exists(exe) else None
+
+
+def chosen_steam_folders() -> list[str]:
+    """Drives or folders the player named as holding Steam games, in the app
+    or in Setup, looked in before anything found automatically. The
+    KNOXMAP_STEAM_FOLDERS environment variable adds more, separated by ';'."""
+    chosen = [p for p in os.environ.get("KNOXMAP_STEAM_FOLDERS", "").split(";") if p.strip()]
+    saved = load_config().get("steam_folders", [])
+    if isinstance(saved, str):
+        saved = saved.split(";")
+    return [p.strip().strip('"') for p in chosen + list(saved) if str(p).strip()]
+
+
+def save_steam_folders(folders: list[str]) -> None:
+    config = load_config()
+    config["steam_folders"] = [str(f).strip().strip('"') for f in folders if str(f).strip()]
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+
+
+def library_of(folder: str | Path) -> list[Path]:
+    """The Steam libraries a folder the player named could mean: the library
+    itself, one inside it (a drive's SteamLibrary), or the library a path
+    deeper inside it belongs to (…/steamapps/common/ProjectZomboid)."""
+    text = str(folder).strip().strip('"')
+    if not text:
+        return []
+    if re.fullmatch(r"[A-Za-z]:?[\\/]?", text):        # "E", "E:" or "E:\"
+        text = text[0] + ":\\"
+    path = Path(text)
+    parts = [p.lower() for p in path.parts]
+    if "steamapps" in parts:
+        path = Path(*path.parts[:parts.index("steamapps")])
+    candidates = [path] + [path / sub for sub in _LIBRARY_NAMES]
+    return [c for c in candidates if _is_dir(c / "steamapps")]
+
+
+_LIBRARY_NAMES = ("SteamLibrary", "Steam", "Steam Library", "Games\\Steam", "Games\\SteamLibrary",
+                  "Program Files (x86)\\Steam", "Program Files\\Steam")
+
+
+def steam_libraries_found() -> list[dict]:
+    """Every Steam library in use, and whether the player chose it or it was
+    found automatically - for the app and Setup to show."""
+    chosen = {str(lib).lower() for folder in chosen_steam_folders() for lib in library_of(folder)}
+    return [{"path": str(lib), "chosen": str(lib).lower() in chosen} for lib in _steam_libraries()]
 
 
 def _steam_libraries() -> list[Path]:
-    """Every Steam library folder on this PC, read from Steam itself."""
+    """Every Steam library folder on this PC: the ones the player chose, then
+    the ones Steam itself lists, then the usual folders on every drive."""
+    libraries: list[Path] = [lib for folder in chosen_steam_folders() for lib in library_of(folder)]
     roots: list[Path] = []
     try:
         import winreg
@@ -93,22 +141,46 @@ def _steam_libraries() -> list[Path]:
     roots += [Path(r"C:\Program Files (x86)\Steam"), Path.home() / ".steam" / "steam",
               Path.home() / ".local" / "share" / "Steam"]
 
-    libraries: list[Path] = []
     for root in roots:
         vdf = root / "steamapps" / "libraryfolders.vdf"
-        if not vdf.exists():
+        if not _exists(vdf):
             continue
         libraries.append(root)
-        text = vdf.read_text(encoding="utf-8", errors="replace")
+        try:
+            text = vdf.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
         for m in re.finditer(r'"path"\s+"([^"]+)"', text):
             libraries.append(Path(m.group(1).replace("\\\\", "\\")))
+    # Steam keeps listing a library on a drive that has been unplugged or
+    # removed; also look for the usual library folders on every drive, for a
+    # library Steam's own files do not name.
+    if os.name == "nt":
+        for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+            libraries += [Path(f"{letter}:\\") / sub for sub in _LIBRARY_NAMES]
     seen, unique = set(), []
     for lib in libraries:
         key = str(lib).lower()
-        if key not in seen:
+        if key not in seen and _is_dir(lib / "steamapps"):
             seen.add(key)
             unique.append(lib)
     return unique
+
+
+def _exists(path: Path) -> bool:
+    """Path.exists that is False, not an error, for a missing drive, a
+    disconnected network share or a folder Windows will not let us read."""
+    try:
+        return path.exists()
+    except (OSError, ValueError):
+        return False
+
+
+def _is_dir(path: Path) -> bool:
+    try:
+        return path.is_dir()
+    except (OSError, ValueError):
+        return False
 
 
 def pz_install_dir() -> Path | None:
@@ -118,7 +190,7 @@ def pz_install_dir() -> Path | None:
         return configured
     for lib in _steam_libraries():
         candidate = lib / "steamapps" / "common" / "ProjectZomboid"
-        if (candidate / "media" / "texturepacks").exists():
+        if _exists(candidate / "media" / "texturepacks"):
             return candidate
     return None
 
@@ -142,9 +214,9 @@ def workshop_mod_installed(workshop_id: str, folder: str) -> bool:
     """Whether a mod is on this PC: subscribed on the Workshop in any Steam
     library, or copied into the mods folder under its own name."""
     for lib in _steam_libraries():
-        if (lib / "steamapps" / "workshop" / "content" / "108600" / workshop_id).is_dir():
+        if _is_dir(lib / "steamapps" / "workshop" / "content" / "108600" / workshop_id):
             return True
-    return (zomboid_user_dir() / "mods" / folder).is_dir()
+    return _is_dir(zomboid_user_dir() / "mods" / folder)
 
 
 ERIKAS_TILES_WORKSHOP_ID = "3346506593"
@@ -155,8 +227,10 @@ def erikas_tiles_media() -> Path | None:
     """The media folder of Erika's Tiles, if the mod is on this PC."""
     for lib in _steam_libraries():
         base = lib / "steamapps" / "workshop" / "content" / "108600" / ERIKAS_TILES_WORKSHOP_ID
+        if not _is_dir(base):
+            continue
         for media in base.glob("mods/*/common/media"):
-            if (media / "texturepacks" / "Erikas_Tiles.pack").exists():
+            if _exists(media / "texturepacks" / "Erikas_Tiles.pack"):
                 return media
     return None
 
@@ -166,7 +240,7 @@ def erikas_tiles_ready() -> bool:
     buildings may use them (Setup extracts them)."""
     tools = mapping_tools_dir()
     return bool(erikas_tiles_media() and tools and
-                (tools / "Tiles" / "2x" / "walls_decoration_paintings_erika_01.png").exists())
+                _exists(tools / "Tiles" / "2x" / "walls_decoration_paintings_erika_01.png"))
 
 
 def elevators_mod_installed() -> bool:

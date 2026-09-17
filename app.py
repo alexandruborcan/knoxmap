@@ -776,6 +776,26 @@ def api_setup_status():
                     "mods_dir": str(knoxpaths.zomboid_user_dir() / "mods")})
 
 
+@app.route("/api/steam-libraries", methods=["GET", "POST"])
+def api_steam_libraries():
+    """The Steam libraries KnoxMap looks in for the game and Workshop mods:
+    found on their own, plus the drives or folders the player chose."""
+    import knoxpaths
+
+    if request.method == "POST":
+        folders = [str(f).strip().strip('"') for f in (request.get_json(silent=True) or {}).get("folders", [])
+                   if str(f).strip()]
+        bad = [f for f in folders if not knoxpaths.library_of(f)]
+        if bad:
+            return jsonify({"error": f"No Steam library found in {', '.join(bad)}. Name the drive "
+                                     "(E:) or the folder that holds steamapps."}), 400
+        knoxpaths.save_steam_folders(folders)
+        log.info("steam folders chosen: %s", folders)
+    return jsonify({"libraries": knoxpaths.steam_libraries_found(),
+                    "chosen": knoxpaths.load_config().get("steam_folders", []),
+                    "game": str(knoxpaths.pz_install_dir() or "")})
+
+
 def _has_road_rules(tools) -> bool:
     if not tools:
         return False

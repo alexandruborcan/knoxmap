@@ -409,6 +409,50 @@ async function checkSetup() {
 }
 checkSetup();
 
+// ---- Steam libraries -------------------------------------------------------------
+//
+// Found on their own; a drive that was missed (or that Steam still lists after
+// it is gone) can be named here instead of running Setup again.
+
+function showSteamLibraries(data) {
+  document.getElementById('steamList').innerHTML = data.libraries.length
+    ? data.libraries.map(l => `<li class="ok"><span>✓</span>${escapeHtml(l.path)}${
+        l.chosen ? ' <i>(chosen)</i>' : ''}</li>`).join('')
+    : '<li class="missing"><span>✗</span>No Steam library found</li>';
+  const field = document.getElementById('steamFolders');
+  if (document.activeElement !== field) field.value = (data.chosen || []).join('; ');
+  document.getElementById('steamNote').className = 'hint';
+  document.getElementById('steamNote').textContent =
+    data.game ? `Project Zomboid: ${data.game}` : 'Project Zomboid was not found in these.';
+}
+
+async function loadSteamLibraries() {
+  try {
+    showSteamLibraries(await (await fetch('/api/steam-libraries')).json());
+  } catch (_) { /* optional */ }
+}
+
+document.getElementById('steamLibraries').addEventListener('toggle', e => {
+  if (e.target.open) loadSteamLibraries();
+});
+
+document.getElementById('steamSave').addEventListener('click', async () => {
+  const folders = document.getElementById('steamFolders').value
+    .split(';').map(s => s.trim()).filter(Boolean);
+  try {
+    const res = await fetch('/api/steam-libraries', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folders }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw apiError(data, res);
+    showSteamLibraries(data);
+    checkSetup();
+  } catch (err) {
+    note('steamNote', err.message, 'bad');
+  }
+});
+
 loadSettings().catch(() => {
   document.getElementById('advanced-body').textContent =
     'Could not load the settings list.';

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.3
+
+- Setup no longer fails when Steam still lists a library on a drive that is
+  gone ("A device which does not exist was specified"); that library is
+  skipped.
+- Steam libraries are found on every drive, and you can name the drive or
+  folder yourself: in Setup, or in the app under **Settings > Steam
+  libraries**.
+
 ## 1.3.2
 
 - The version you are running is shown at the top of the window, in its

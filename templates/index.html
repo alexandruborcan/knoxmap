@@ -120,6 +120,18 @@
         </div>
         <button type="button" id="resetSettings" class="linkish">Reset to the defaults for this kind of place</button>
       </details>
+
+      <details id="steamLibraries">
+        <summary>Steam libraries</summary>
+        <p class="hint">Where KnoxMap looks for the game and Workshop mods. They are found on
+          their own; if yours are on a drive that was missed, name it here.</p>
+        <ul class="setup-list" id="steamList"></ul>
+        <label class="field">Other drives or folders (separated by ;)
+          <input type="text" id="steamFolders" placeholder="E: or E:\Games\Steam"/>
+        </label>
+        <button type="button" id="steamSave" class="btn">Save and look again</button>
+        <div id="steamNote" class="hint"></div>
+      </details>
     </section>
 
     <section class="panel" data-card="generate">

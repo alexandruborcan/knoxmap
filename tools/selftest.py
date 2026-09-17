@@ -183,6 +183,41 @@ def check_repair(check, out: str) -> None:
           "a sound project is left exactly as it is")
 
 
+def check_missing_drive(check) -> None:
+    """A Steam library on a drive that is gone (Windows raises for it rather
+    than saying it is not there) is skipped, not a crash in Setup."""
+    import knoxpaths
+
+    class Gone(type(Path())):
+        def stat(self, *a, **k):
+            raise OSError(433, "A device which does not exist was specified", str(self))
+
+    gone = Gone("F:/SteamLibrary")
+    check(not knoxpaths._is_dir(gone / "steamapps") and not knoxpaths._exists(gone),
+          "a Steam library on a missing drive is skipped")
+
+    # A drive or folder the player names finds the library in it or above it.
+    import tempfile
+    with tempfile.TemporaryDirectory() as drive:
+        lib = Path(drive) / "SteamLibrary"
+        game = lib / "steamapps" / "common" / "ProjectZomboid"
+        game.mkdir(parents=True)
+        check(knoxpaths.library_of(drive) == [lib] and knoxpaths.library_of(game) == [lib]
+              and knoxpaths.library_of(Path(drive) / "nothing") == [],
+              "a chosen drive or folder finds its Steam library")
+        old = os.environ.get("KNOXMAP_STEAM_FOLDERS")
+        os.environ["KNOXMAP_STEAM_FOLDERS"] = drive
+        try:
+            found = knoxpaths.steam_libraries_found()
+            check(found and found[0]["path"] == str(lib) and found[0]["chosen"],
+                  "a chosen Steam library is looked in first")
+        finally:
+            if old is None:
+                os.environ.pop("KNOXMAP_STEAM_FOLDERS")
+            else:
+                os.environ["KNOXMAP_STEAM_FOLDERS"] = old
+
+
 def check_updater(check, work: str) -> None:
     """An update applied to a pretend install: new and changed files go in,
     dropped files go, and maps, logs and the Python environment are left alone."""
@@ -415,6 +450,7 @@ def main(argv: list[str]) -> int:
 
         print("updates")
         check_updater(check, work)
+        check_missing_drive(check)
 
         print("error log")
         import zipfile

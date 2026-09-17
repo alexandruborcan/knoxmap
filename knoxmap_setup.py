@@ -158,8 +158,33 @@ def _warn_if_not_build42(game: Path) -> None:
     say("")
 
 
+def choose_steam_folders() -> None:
+    """Show the Steam libraries found on their own, and let the player add a
+    drive or folder they were not found on (games and Workshop mods on
+    another drive). Also chosen later in the app, under Steam libraries."""
+    found = knoxpaths.steam_libraries_found()
+    say("      Steam libraries: " + (", ".join(f["path"] for f in found) or "none found"))
+    if os.environ.get("KNOXMAP_UNATTENDED") == "1":
+        return
+    while True:
+        answer = input("      Games or Workshop mods on another drive? Type the drive or folder\n"
+                       "      (like E: or E:\\Games\\Steam, several separated by ;),\n"
+                       "      or press Enter to go on: ").strip()
+        if not answer:
+            return
+        folders = [a.strip().strip('"') for a in answer.split(";") if a.strip()]
+        bad = [f for f in folders if not knoxpaths.library_of(f)]
+        if bad:
+            say(f"      No Steam library in {', '.join(bad)} - try again.")
+            continue
+        knoxpaths.save_steam_folders(knoxpaths.chosen_steam_folders() + folders)
+        say("      Steam libraries: " + ", ".join(f["path"] for f in knoxpaths.steam_libraries_found()))
+        return
+
+
 def find_game() -> Path | None:
     step(3, "Project Zomboid install")
+    choose_steam_folders()
     game = knoxpaths.pz_install_dir()
     if game:
         say(f"      found at {game}")
