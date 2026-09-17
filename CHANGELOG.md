@@ -7,6 +7,11 @@
   is checked against GitHub's fingerprint and goes in when KnoxMap restarts -
   including an older one, for when a new release breaks something. On an older
   version automatic updates stay off until you choose the newest again.
+- The in-game map holds up in a packed city centre: a map cell with more
+  outlines than the game can index is simplified, and thinned if it has to
+  be, instead of the map screen throwing them away as it drew them.
+- Steam libraries are looked up once a minute rather than on every request,
+  so a disconnected network drive cannot make the window slow.
 
 ## 1.3.4
 
