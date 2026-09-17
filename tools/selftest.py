@@ -79,6 +79,14 @@ def town() -> list[OSMFeature]:
             elif (bx, by) == (3, 1):
                 feats.append(way({"building": "church", "name": "Selftest Church"},
                                  box(x0, y0, x0 + 30, y0 + 50)))
+            elif (bx, by) == (4, 0):
+                # A petrol station with room for a forecourt, and a car park.
+                feats.append(way({"building": "retail", "amenity": "fuel", "name": "Selftest Gas"},
+                                 box(x0 + 10, y0 + 5, x0 + 24, y0 + 15)))
+                feats.append(way({"amenity": "parking"}, box(x0, y0 + 30, x0 + 60, y0 + 62)))
+                # And its canopy, a roof over the forecourt, where the pumps go.
+                feats.append(way({"building": "roof", "amenity": "fuel"},
+                                 box(x0 + 34, y0 + 4, x0 + 54, y0 + 16)))
             elif (bx, by) == (0, 4):
                 # A pizza place and a supermarket, to be fitted out as such.
                 feats.append(way({"building": "yes", "amenity": "restaurant", "cuisine": "pizza",
@@ -181,6 +189,42 @@ def check_repair(check, out: str) -> None:
           f"(moved {report['moved']}, dropped {len(report['dropped'])})")
     check(not repair_project(broken)["changed"] and not repair_project(source)["changed"],
           "a sound project is left exactly as it is")
+
+
+def check_straight_roads(check) -> None:
+    """Knox County roads: every road in grid or 45-degree runs, roads that met
+    still meeting, and the buildings beside them moved with them."""
+    from generator.octilinear import straighten_roads
+    from generator.renderer import Projector, _is_polygon, classify
+
+    proj = Projector.build(SOUTH, WEST, SOUTH + 0.0054, WEST + 0.0068, 1.0)
+    # A long road at 12 degrees, a side street off it at 70, a crescent, and a
+    # house beside the first.
+    main = way({"highway": "primary"}, [(20, 100), (560, 215)])
+    side = way({"highway": "residential"}, [(20, 100), (80, 265), (140, 430)])
+    crescent = way({"highway": "residential"},
+                   [(300, 400 + 60 * math.sin(t / 10)) for t in range(0, 32)])
+    house = way({"building": "house"}, box(300, 170, 312, 180))
+    before = proj.to_px(*house.geometry[0])
+    feats = [main, side, crescent, house]
+    straighten_roads(feats, proj, classify, _is_polygon)
+
+    def runs_ok(f):
+        pts = [proj.to_px(*p) for p in f.geometry]
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            dx, dy = round(x1 - x0), round(y1 - y0)
+            if not (dx == 0 or dy == 0 or abs(dx) == abs(dy)):
+                return False
+        return True
+
+    check(all(runs_ok(f) for f in (main, side, crescent)),
+          "Knox County roads run only along the tiles or on 45-degree diagonals")
+    check(main.geometry[0] == side.geometry[0],
+          "roads that met still meet once straightened")
+    check(len({round(proj.to_px(*p)[1]) for p in main.geometry}) <= 2,
+          "a long road at 12 degrees becomes straight, not a staircase")
+    after = proj.to_px(*house.geometry[0])
+    check(math.dist(before, after) > 0.5, "the houses beside a road move with it")
 
 
 def check_missing_drive(check) -> None:
@@ -357,6 +401,13 @@ def main(argv: list[str]) -> int:
         tall = [p for p in tbx if "fixtures_escalators_01_49" in open(p, encoding="utf-8").read()]
         check(len(tall) >= 1, "the seven-storey flats have a lift")
         school = [p for p in tbx if 'InternalName="classroom"' in open(p, encoding="utf-8").read()]
+        pumps = [p for p in tbx if os.path.basename(p).startswith("selftest_pumps_")]
+        check(pumps and any("_01_14" in open(p, encoding="utf-8").read() or
+                            "_01_12" in open(p, encoding="utf-8").read() for p in pumps)
+              and any("selftest_pumps_" in line for line in pzw_text.splitlines()),
+              "the petrol station has pumps")
+        stalls = len(re.findall(r'group="ParkingStall"', pzw_text))
+        check(stalls >= 40, f"car parks and drives have parking stalls ({stalls})")
         check(len(school) >= 1, "the school has classrooms")
         texts = [open(p, encoding="utf-8").read() for p in tbx]
         windows = {m for t in texts for m in re.findall(r'category="windows">\s*<tile enum="West" tile="(\w+)"', t)}
@@ -370,7 +421,7 @@ def main(argv: list[str]) -> int:
             west = re.search(r'enum="West" tile="(\w+)"', blocks[ext - 1])
             gap = re.search(r'enum="CapGapE3" tile="(\w+)"', blocks[cap - 1])
             return bool(west and gap and west.group(1) == gap.group(1))
-        houses_tbx = [t for p, t in zip(tbx, texts) if "_fences_" not in p and "_structures_" not in p]
+        houses_tbx = [t for p, t in zip(tbx, texts) if not any(k in p for k in ("_fences_", "_structures_", "_pumps_"))]
         check(all(gaps_match(t) for t in houses_tbx), "flat roofs wall in the top floor with its own material")
         check(any("_fences_" in p for p in tbx), "back yards are fenced")
         yard = Image.open(os.path.join(out, "selftest.bmp")).convert("RGB")
@@ -451,6 +502,7 @@ def main(argv: list[str]) -> int:
         print("updates")
         check_updater(check, work)
         check_missing_drive(check)
+        check_straight_roads(check)
 
         print("error log")
         import zipfile
@@ -497,6 +549,11 @@ def main(argv: list[str]) -> int:
         info = open(os.path.join(mod_root, "mod.info"), encoding="utf-8").read()
         check("OpenStreetMap" in info, "OpenStreetMap credit in the mod description")
         check("require=" not in info, "a map without mod tiles requires no mods")
+        objects = os.path.join(mod_root, "common", "media", "maps", "Selftest Town", "objects.lua")
+        text = open(objects, encoding="utf-8").read() if os.path.exists(objects) else ""
+        check(text.startswith("objects = {") and text.count('type = "ParkingStall"') == stalls
+              and re.search(r'x = 2\d{4}, y = \d+, z = 0', text),
+              "the parking stalls reach the game in objects.lua, at world tiles")
         open(os.path.join(lots, "0_0.lotheader"), "wb").write(b"LOTH\x01\x00\x00\x00signs_erika_01_000\n")
         with contextlib.redirect_stdout(io.StringIO()):
             mod_root, cells, extras = package(out, "Selftest: Town", "selftest", mods_dir=mods)

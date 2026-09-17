@@ -301,7 +301,8 @@ def pick_style(kind: str | None, tile_x: int, tile_y: int, rng,
 
 
 def _detect_zones(landscape_path: str, placements, rng_seed: int = 7,
-                  settings: Settings | None = None):
+                  settings: Settings | None = None, areas=None, drives=(),
+                  keep_clear=()):
     """Parking stalls along the roads, town zones over built-up ground.
 
     Without these the streets are bare: vehicles only ever spawn inside
@@ -344,6 +345,50 @@ def _detect_zones(landscape_path: str, placements, rng_seed: int = 7,
     step = 14           # how often to consider a spot
     taken: set[tuple[int, int]] = set()
 
+    # A car on most drives, as in Knox County.
+    for x, y, sw, sh in drives:
+        if rng.random() <= min(1.0, 0.6 * settings.parking_density):
+            taken.add((x // 8, y // 8))
+            zones.append(Zone("ParkingStall", x, y, sw, sh))
+
+    # Car parks OpenStreetMap maps as such: rows of stalls across the whole of
+    # each, two rows back to back and then a lane, the way a real one is laid
+    # out. Sampling the tarmac every 14 tiles found at most a stall or two in
+    # anything smaller than a supermarket's, so most car parks had no cars.
+    if areas is not None:
+        from shapely.geometry import box
+
+        buildings = [box(p.tile_x, p.tile_y, p.tile_x + p.width, p.tile_y + p.height)
+                     for p in placements]
+        from shapely import STRtree
+        built = STRtree(buildings) if buildings else None
+        lots = [shape for shape, props in areas._items if props.get("category") == "parking"]
+        hard = ASPHALT | {C.PALE_CONCRETE, C.PAVING}
+        for lot in lots:
+            x0, y0, x1, y1 = (int(v) for v in lot.bounds)
+            across = (x1 - x0) >= (y1 - y0)      # rows run along the long side
+            sw, sh = (STALL_W, STALL_H) if across else (STALL_H, STALL_W)
+            lane = 17                            # two rows of 5, and a 7-tile lane
+            for a in range(0, (y1 - y0 if across else x1 - x0), lane):
+                for row in (0, STALL_H):
+                    for b in range(0, (x1 - x0 if across else y1 - y0), STALL_W):
+                        x, y = (x0 + b, y0 + a + row) if across else (x0 + a + row, y0 + b)
+                        if not (0 <= x and x + sw <= w and 0 <= y and y + sh <= h):
+                            continue
+                        stall = box(x, y, x + sw, y + sh)
+                        if not lot.contains(stall):
+                            continue
+                        if any(px[i, j] not in hard for i in (x, x + sw - 1)
+                               for j in (y, y + sh - 1)):
+                            continue
+                        if built is not None and any(buildings[int(i)].intersects(stall)
+                                                     for i in built.query(stall)):
+                            continue
+                        if rng.random() > min(1.0, 0.55 * settings.parking_density):
+                            continue
+                        taken.add((x // 8, y // 8))
+                        zones.append(Zone("ParkingStall", x, y, sw, sh))
+
     for y in range(4, h - STALL_H - 4, step):
         for x in range(4, w - STALL_W - 4, step):
             if not is_asphalt(x, y):
@@ -363,6 +408,10 @@ def _detect_zones(landscape_path: str, placements, rng_seed: int = 7,
                 continue
             vertical = is_asphalt(x, y - 2) or is_asphalt(x, y + 2)
             sw, sh = (STALL_W, STALL_H) if vertical else (STALL_H, STALL_W)
+            # Not on a petrol station's forecourt, where the pumps stand.
+            if any(x < fx + fw and fx < x + sw and y < fy + fh and fy < y + sh
+                   for fx, fy, fw, fh in keep_clear):
+                continue
             key = (x // 8, y // 8)
             if key in taken:
                 continue
@@ -444,6 +493,27 @@ def _street_finder(out_dir: str, map_name: str):
     return side
 
 
+def _road_weight(out_dir: str, map_name: str, proj) -> np.ndarray | None:
+    """2 on carriageway, 1 on pavement, 0 elsewhere, from the ground as the
+    renderer drew it."""
+    from PIL import Image
+
+    from generator import pz_colors as C
+
+    path = os.path.join(out_dir, f"{map_name}_ground_base.bmp")
+    if not os.path.exists(path):
+        path = os.path.join(out_dir, f"{map_name}.bmp")
+    if not os.path.exists(path):
+        return None
+    ground = np.array(Image.open(path).convert("RGB"))[:proj.height, :proj.width]
+    weight = np.zeros(ground.shape[:2], dtype=np.int8)
+    for colour in (C.PALE_CONCRETE,):
+        weight[np.all(ground == colour, axis=2)] = 1
+    for colour in (C.MEDIUM_ASPHALT, C.DARKEST_ASPHALT, C.DARK_POTHOLE, C.LIGHT_POTHOLE):
+        weight[np.all(ground == colour, axis=2)] = 2
+    return weight
+
+
 def _points_of_use(out_dir: str, info: dict, map_name: str, proj) -> dict:
     """Shops, restaurants, offices and the like mapped as points, from the
     map's OpenStreetMap download, as {(x // 16, y // 16): [(x, y, tags)]} in
@@ -453,7 +523,13 @@ def _points_of_use(out_dir: str, info: dict, map_name: str, proj) -> dict:
     cache = os.path.join(out_dir, info["osm_cache"]) if info.get("osm_cache")         else osm.cache_path(out_dir, map_name)
     wanted = tuple(info["osm_bbox"]) if info.get("osm_bbox") else         (bbox.get("south"), bbox.get("west"), bbox.get("north"), bbox.get("east"))
     grid: dict = {}
-    for feat in osm.load_cache(cache, wanted) or []:
+    feats = osm.load_cache(cache, wanted) or []
+    if info.get("straight_roads") and feats:
+        # Where the renderer moved them to, with the roads straightened.
+        from generator.octilinear import straighten_roads
+        from generator.renderer import _is_polygon, classify
+        straighten_roads(feats, proj, classify, _is_polygon)
+    for feat in feats:
         if feat.kind != "node" or not any(k in feat.tags for k in USE_KEYS):
             continue
         lat, lon = feat.geometry[0]
@@ -636,6 +712,9 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     # Real outlines of the buildings placed, for the in-game paper map.
     outlines: list[tuple[list[tuple[float, float]], str, str]] = []
     occupied = np.zeros((proj.height, proj.width), dtype=bool)
+    # Knox County roads: every building upright, and stood clear of the roads.
+    straight = bool(settings.straight_roads or info.get("straight_roads"))
+    road_weight = _road_weight(out_dir, map_name, proj) if straight else None
 
     # Biggest footprints claim their tiles first. Where two real buildings
     # share a wall, one of them has to give up that row of tiles, and it should
@@ -643,6 +722,8 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     order = []
     jobs: list[tuple] = []       # what each building needs to lay itself out
     street_side = _street_finder(out_dir, map_name)
+    stations: list[tuple] = []   # petrol stations, for their pumps
+    canopies: list[list] = []    # and the canopies over their forecourts
     decided: list[tuple] = []    # and what the map needs to know about it
     surroundings: list[tuple[float, float, float, int | None]] = []
     for i, feat in enumerate(geo["features"]):
@@ -652,6 +733,9 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
         tags = feat.get("properties", {})
         if (tags.get("building") or "").strip().lower() in NOT_BUILDINGS:
             skipped["not a building"] += 1
+            if tags.get("amenity") == "fuel":
+                # A petrol station's canopy: its forecourt, pumps underneath.
+                canopies.append([proj.to_px(lat, lon) for lon, lat in pts])
             continue
         px = [proj.to_px(lat, lon) for lon, lat in pts]
         poly = Polygon(px)
@@ -669,7 +753,8 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     for _neg_area, i, px in order:
         feat = geo["features"][i]
         fp, reason = place(px, occupied, min_side=min_size, max_side=max_size,
-                           snap_degrees=settings.square_buildings)
+                           snap_degrees=45 if straight else settings.square_buildings,
+                           avoid=road_weight)
         if fp is None:
             skipped[reason] += 1
             continue
@@ -689,6 +774,8 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
         inside = [tags] + _points_inside(points, px, points_taken)
         uses = uses_of(inside)
         hotel = is_hotel(inside)
+        if ("gasstore", "storage") in uses:
+            stations.append((x0, y0, w, h, street_side(x0, y0, w, h)))
         offices_only = bool(uses) and all(u == ("office", "office") for u in uses)
         if uses:
             with_uses += 1
@@ -808,7 +895,17 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
         })
     rows.sort(key=lambda r: r["file"])
     from .yards import paint_paths
-    paths, yard_fences = paint_paths(out_dir, map_name, rows, occupied)
+    drives: list = []
+    paths, yard_fences = paint_paths(out_dir, map_name, rows, occupied, drives)
+
+    # Pumps on a forecourt at each petrol station, including those mapped as
+    # a point with no building of their own.
+    from .pumps import place_pumps
+    loose_fuel = [(x, y) for group in points.values() for x, y, t in group
+                  if t.get("amenity") == "fuel" and (x, y) not in points_taken]
+    forecourts: list = []
+    pump_placements, n_pumps = place_pumps(out_dir, map_name, bdir, occupied,
+                                           stations, loose_fuel, forecourts, canopies)
 
     fence_placements, fence_tiles = build_fences(out_dir, map_name, proj,
                                                  occupied, areas, bdir,
@@ -831,12 +928,13 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     paper_map = worldmap.write(out_dir, map_name, proj, info, outlines)
 
     zones = _detect_zones(os.path.join(out_dir, f"{map_name}.bmp"),
-                          placements, settings=settings)
+                          placements, settings=settings, areas=areas, drives=drives,
+                          keep_clear=forecourts)
     # Fences go into the project alongside the buildings, but not into the
     # town zones: a fence lot spans its whole cell and would mark it all town.
     from .structures import build_structures
     structure_placements, raised = build_structures(out_dir, map_name, bdir)
-    placements = placements + fence_placements + structure_placements
+    placements = placements + fence_placements + structure_placements + pump_placements
 
     pzw_path = os.path.join(out_dir, f"{map_name}.pzw")
     with open(pzw_path, "w", encoding="utf-8") as f:
@@ -884,6 +982,8 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     n_park = sum(1 for z in zones if z.kind == "ParkingStall")
     n_town = sum(1 for z in zones if z.kind == "TownZone")
     print(f"zones                 : {n_park} parking, {n_town} town")
+    print(f"petrol stations       : {n_pumps} pumps at {len(stations)} stations"
+          f", {len(canopies)} canopies and {len(loose_fuel)} points")
     print(f"front paths, yards    : {paths} houses, {len(yard_fences)} back yards")
     print(f"fences                : {fence_tiles} fence tiles in "
           f"{len(fence_placements)} lots")

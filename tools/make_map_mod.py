@@ -186,6 +186,57 @@ def write_spawnpoints(project_dir: str, map_dir: str, limit: int = 8) -> int:
     return len(points)
 
 
+def write_objects(project_dir: str, map_dir: str) -> dict[str, int]:
+    """Write objects.lua, the zones the game reads: ParkingStall is the only
+    place a vehicle ever spawns, TownZone marks ground as town.
+
+    The zones are in the WorldEd project, but compiling lots does not export
+    them - maps went into the game with no objects.lua at all, and so without
+    a single parked car. Written here from the project instead, in the form
+    the game's own maps use: absolute world tiles.
+
+        objects = {
+          { name = "", type = "ParkingStall", x = 21040, y = 310, z = 0, width = 3, height = 5 },
+        }
+    """
+    import re
+
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from knoxbuild.world import CELL_SIZE
+
+    ox, oy = _world_origin_tiles(project_dir)
+    pzw = next((os.path.join(project_dir, e) for e in sorted(os.listdir(project_dir))
+                if e.endswith(".pzw")), None)
+    rows, counts = [], {}
+    if pzw:
+        cx = cy = None
+        with open(pzw, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                cell = re.search(r'<cell x="(-?\d+)" y="(-?\d+)"', line)
+                if cell:
+                    cx, cy = int(cell.group(1)), int(cell.group(2))
+                    continue
+                if "<object " not in line or cx is None:
+                    continue
+                attrs = dict(re.findall(r'(\w+)="([^"]*)"', line))
+                try:
+                    kind = attrs.get("type") or attrs["group"]
+                    x = ox + cx * CELL_SIZE + int(attrs["x"])
+                    y = oy + cy * CELL_SIZE + int(attrs["y"])
+                    z, w, h = int(attrs.get("level", 0)), int(attrs["width"]), int(attrs["height"])
+                except (KeyError, ValueError):
+                    continue
+                if w <= 0 or h <= 0 or not re.fullmatch(r"\w+", kind):
+                    continue
+                name = re.sub(r'[^\w ]', "", attrs.get("name", ""))
+                rows.append(f'  {{ name = "{name}", type = "{kind}", x = {x}, y = {y}, '
+                            f'z = {z}, width = {w}, height = {h} }}')
+                counts[kind] = counts.get(kind, 0) + 1
+    with open(os.path.join(map_dir, "objects.lua"), "w", encoding="utf-8") as f:
+        f.write("objects = {\n" + ",\n".join(rows) + ("\n" if rows else "") + "}\n")
+    return counts
+
+
 SPAWN_SELECTOR_MAX_POIS = 80
 # Paper-map label styles that name somewhere a player might want to start.
 SPAWN_SELECTOR_STYLES = {"text-building": "landmark", "text-place": "landmark"}
@@ -393,6 +444,9 @@ def package(project_dir: str, name: str, mod_id: str,
     n_spawns = 0
     if not any(os.path.basename(e) == "spawnpoints.lua" for e in extras):
         n_spawns = write_spawnpoints(project_dir, map_dir)
+    zone_counts = {}
+    if not any(os.path.basename(e) == "objects.lua" for e in extras):
+        zone_counts = write_objects(project_dir, map_dir)
 
     # Build 42 scans version folders, and each needs its own copy of mod.info —
     # a root-only one leaves the mod invisible in the in-game Mods menu. An
@@ -418,6 +472,9 @@ def package(project_dir: str, name: str, mod_id: str,
     extra_names = [os.path.basename(e) for e in extras]
     if n_spawns:
         extra_names.append(f"spawnpoints.lua ({n_spawns} spawn points)")
+    if zone_counts:
+        extra_names.append(f"objects.lua ({zone_counts.get('ParkingStall', 0)} parking stalls, "
+                           f"{zone_counts.get('TownZone', 0)} town zones)")
     extra_names.append(f"Spawn Selector support ({n_pois} places)")
     return mod_root, sum(1 for c in cells if c.endswith(".lotheader")), extra_names
 

@@ -38,7 +38,11 @@ actually lived, and installs the result as a mod.
 
 - **The real street plan.** Roads at their real widths, with pavements, kerbs
   and centre lines. The map is turned so the town's main street grid runs along
-  the game's tiles, so streets are straight lines, not staircases.
+  the game's tiles, so streets are straight lines, not staircases. Or, with
+  *Knox County roads*, every road laid in straight runs and 45-degree corners
+  like the game's own map, the town bent gently to fit.
+- **Cars** parked along the streets, in rows in the car parks and on the
+  drives, and **petrol stations** with a forecourt and pumps that hold fuel.
 - **Water, bridges and railways.** Seas and harbours, rivers with square
   railed bridges, canals, piers and railway lines. A road or railway over
   another is a real overpass: ramps up to a railed deck, the road below
@@ -108,7 +112,8 @@ setup downloads a private copy into the KnoxMap folder.
    - downloads the free [PZ Mapping Tools](https://github.com/Unjammer/PZ_Mapping_Tools),
    - downloads the map compiler from this repository's releases and checks its fingerprint,
    - finds your Project Zomboid install and copies the tile artwork the map tools
-     need **from your own copy of the game**,
+     need **from your own copy of the game** (games or Workshop mods on another
+     drive: name it when setup asks, or later under *Settings > Steam libraries*),
    - adds the rules for kerbs, road markings and Build 42 trees to the map tools.
 
    It takes a few minutes, once. After that `KnoxMap.bat` opens straight away.
@@ -159,6 +164,7 @@ Open **Fine tuning** under *Style*:
 | **Flats above / Flats chance** | How readily large untagged buildings become blocks of flats. |
 | **Tallest building** | The storey limit, up to 30. Real heights from OpenStreetMap are used where mapped. Tall cities take much longer to compile. |
 | **Straighten streets** | 1 turns the map so its main street grid runs along the tiles; 0 keeps north straight up, with diagonal streets as staircases. |
+| **Knox County roads** | 1 lays every road in straight runs along the tiles and on 45-degree diagonals, like the game's own map: curves become straight sides with 45-degree corners, and the buildings, parks and car parks move with their streets and stand upright beside them. Streets end up a little way off their real places. 0 draws roads as mapped. |
 | **Woodland**, **Parking**, **Room size** | What they say. |
 | **Seed** | The same area and seed always give the same town. |
 

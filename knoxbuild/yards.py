@@ -62,8 +62,12 @@ def _outside_doors(tbx_path: str) -> list[tuple[int, int, int, int]]:
     return found
 
 
-def paint_paths(out_dir: str, map_name: str, rows: list[dict], occupied) -> tuple[int, list]:
-    """Dress every house in `rows`. Returns (houses dressed, back-yard fence lines)."""
+def paint_paths(out_dir: str, map_name: str, rows: list[dict], occupied,
+                drives: list | None = None) -> tuple[int, list]:
+    """Dress every house in `rows`. Returns (houses dressed, back-yard fence lines).
+
+    Each drive's parking space, (x, y, width, height) at its house end, is
+    added to `drives` when it is given: the car belongs there."""
     bmp = os.path.join(out_dir, f"{map_name}.bmp")
     base = os.path.join(out_dir, f"{map_name}_ground_base.bmp")
     veg_path = os.path.join(out_dir, f"{map_name}_veg.bmp")
@@ -187,6 +191,11 @@ def paint_paths(out_dir: str, map_name: str, rows: list[dict], occupied) -> tupl
             if strip and t < PATH_MAX_TILES:
                 for x, y in strip:
                     paint(x, y, C.DARK_ASPHALT)
+                if drives is not None:
+                    # The strip starts beside the house: its first five rows.
+                    top = strip[:DRIVE_WIDTH * 5]
+                    xs, ys = [p[0] for p in top], [p[1] for p in top]
+                    drives.append((min(xs), min(ys), max(xs) - min(xs) + 1, max(ys) - min(ys) + 1))
                 # The dustbin at the top of the drive, on the lawn beside it.
                 bx, by = strip[0]
                 put(bx - px, by - py, C.BIN)

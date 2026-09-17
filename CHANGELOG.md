@@ -8,6 +8,19 @@
 - Steam libraries are found on every drive, and you can name the drive or
   folder yourself: in Setup, or in the app under **Settings > Steam
   libraries**.
+- Cars spawn. The parking spaces were in the WorldEd project but never
+  reached the game, which reads them from objects.lua, and compiling did not
+  write one; install writes it now. Install a map again to get its cars.
+- Car parks are laid out in rows of parking spaces, and most house drives
+  have a car on them.
+- **Knox County roads** (under More settings): every road in straight runs
+  along the tiles and on 45-degree diagonals, like the game's own map, with
+  every building upright. The road network is straightened as a whole, so
+  roads still meet where they met, and the buildings, parks and car parks
+  move with the streets around them rather than standing in them.
+- Petrol stations have a tarmac forecourt reaching the street with a row of
+  Fossoil or Gas 2 Go pumps holding fuel, under the canopy where one is
+  mapped; so does a station mapped only as a point.
 
 ## 1.3.2
 

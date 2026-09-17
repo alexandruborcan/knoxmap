@@ -556,6 +556,7 @@ def generate():
         osm_cache=osm_cache_name,
         osm_bbox=osm_bbox,
         shape=shape,
+        straight_roads=bool(settings.straight_roads),
     )
 
     _write_readme(map_dir, map_name, result)

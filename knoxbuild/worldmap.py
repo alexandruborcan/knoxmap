@@ -110,6 +110,11 @@ def write(out_dir: str, map_name: str, proj, info: dict,
     wanted = tuple(info["osm_bbox"]) if info.get("osm_bbox") else \
         (bbox.get("south"), bbox.get("west"), bbox.get("north"), bbox.get("east"))
     feats = osm.load_cache(cache, wanted) or []
+    if info.get("straight_roads"):
+        # The streets as the map drew them, not as they are.
+        from generator.octilinear import straighten_roads
+        from generator.renderer import classify
+        straighten_roads(feats, proj, classify, _is_polygon)
     clip = shape_px(info.get("shape"), proj)
     streets: dict[str, list[tuple[LineString, float]]] = {}
     for feat in feats:

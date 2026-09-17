@@ -109,9 +109,49 @@ class Footprint:
         return self.mask.tolist()
 
 
+NUDGE_TILES = 5
+
+
+def _clear_of(mask: np.ndarray, x0: int, y0: int, avoid: np.ndarray,
+              occupied: np.ndarray) -> tuple[int, int]:
+    """Where to put a footprint so it stands off the roads.
+
+    `avoid` weighs each tile: 2 for carriageway, 1 for pavement, 0 for free
+    ground. With roads straightened and buildings squared up, a building can
+    come out a tile or three into the street; it is moved the least distance,
+    up to NUDGE_TILES, that takes it out, without walking into another."""
+    map_h, map_w = avoid.shape
+    h, w = mask.shape
+
+    def cost(ox, oy):
+        ax0, ay0 = x0 + ox, y0 + oy
+        cx0, cy0 = max(0, ax0), max(0, ay0)
+        cx1, cy1 = min(map_w, ax0 + w), min(map_h, ay0 + h)
+        if cx1 <= cx0 or cy1 <= cy0:
+            return None
+        m = mask[cy0 - ay0:cy1 - ay0, cx0 - ax0:cx1 - ax0]
+        return (int(avoid[cy0:cy1, cx0:cx1][m].sum()),
+                int(occupied[cy0:cy1, cx0:cx1][m].sum()))
+
+    here = cost(0, 0)
+    if here is None or here[0] == 0:
+        return x0, y0
+    best, best_score = (0, 0), here[0] * 4 + here[1]
+    for ox in range(-NUDGE_TILES, NUDGE_TILES + 1):
+        for oy in range(-NUDGE_TILES, NUDGE_TILES + 1):
+            c = cost(ox, oy)
+            if c is None:
+                continue
+            score = c[0] * 4 + c[1] + (abs(ox) + abs(oy)) * 0.5
+            if score < best_score:
+                best, best_score = (ox, oy), score
+    return x0 + best[0], y0 + best[1]
+
+
 def place(px: list[tuple[float, float]], occupied: np.ndarray,
           min_side: float = 0, max_side: float = 1e9,
-          snap_degrees: float = SNAP_DEGREES
+          snap_degrees: float = SNAP_DEGREES,
+          avoid: np.ndarray | None = None
           ) -> tuple[Footprint | None, str]:
     """Rasterise a projected footprint, claiming its tiles in `occupied`.
 
@@ -164,6 +204,9 @@ def place(px: list[tuple[float, float]], occupied: np.ndarray,
         x1, y1 = int(math.ceil(maxx)), int(math.ceil(maxy))
         xs, ys = np.meshgrid(np.arange(x0, x1) + 0.5, np.arange(y0, y1) + 0.5)
         mask = shapely.contains_xy(poly, xs, ys)
+
+    if avoid is not None:
+        x0, y0 = _clear_of(mask, x0, y0, avoid, occupied)
 
     # Clip to the map, then give up tiles already owned by a neighbour.
     h, w = mask.shape

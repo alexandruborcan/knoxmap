@@ -89,6 +89,25 @@ class Projector:
         py = self.height - (y_m - self.min_y_m) / self.meters_per_tile
         return px, py
 
+    def to_latlon(self, px: float, py: float) -> tuple[float, float]:
+        """The inverse of to_px."""
+        back = getattr(self, "_back", None)
+        if back is None:
+            back = pyproj.Transformer.from_crs(self._transformer.target_crs,
+                                               "EPSG:4326", always_xy=True)
+            object.__setattr__(self, "_back", back)
+        x_m = self.min_x_m + px * self.meters_per_tile
+        y_m = self.min_y_m + (self.height - py) * self.meters_per_tile
+        if self.rotation:
+            cx = self.min_x_m + self.width * self.meters_per_tile / 2
+            cy = self.min_y_m + self.height * self.meters_per_tile / 2
+            a = math.radians(-self.rotation)
+            dx, dy = x_m - cx, y_m - cy
+            x_m = cx + dx * math.cos(a) - dy * math.sin(a)
+            y_m = cy + dx * math.sin(a) + dy * math.cos(a)
+        lon, lat = back.transform(x_m, y_m)
+        return lat, lon
+
     def latlon_bbox(self) -> tuple[float, float, float, float]:
         """(south, west, north, east) covering the whole map, turned or not."""
         back = pyproj.Transformer.from_crs(self._transformer.target_crs,
@@ -532,8 +551,14 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
            rotation: float = 0.0,
            osm_cache: str | None = None,
            osm_bbox: tuple[float, float, float, float] | None = None,
-           shape: dict | None = None) -> RenderResult:
+           shape: dict | None = None,
+           straight_roads: bool = False) -> RenderResult:
     proj = Projector.build(south, west, north, east, meters_per_tile, rotation)
+    if straight_roads:
+        # Every road in straight runs at 45-degree steps (octilinear.py).
+        from .octilinear import straighten_roads
+        features = list(features)
+        straighten_roads(features, proj, classify, _is_polygon)
     # A drawn polygon, circle or real outline rather than a rectangle: the map
     # still covers its bounding box in whole cells, but only what lies inside
     # the shape is built.
@@ -722,6 +747,7 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
             "bbox": {"south": south, "west": west, "north": north, "east": east},
             "rotation": rotation,
             "osm_cache": osm_cache,
+            "straight_roads": bool(straight_roads),
             "osm_bbox": list(osm_bbox) if osm_bbox else None,
             "shape": shape,
             "meters_per_tile": meters_per_tile,

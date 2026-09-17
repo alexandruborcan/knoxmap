@@ -35,6 +35,10 @@ class Settings:
     # (1) or keep north straight up (0). Diagonal streets become staircases of
     # tiles; turning the map straightens every street on the grid.
     align_streets: int = 1
+    # Lay every road in straight runs along the tiles and on the 45-degree
+    # diagonal, like Knox County's (1), and stand every building upright on
+    # the grid, clear of the roads; or draw them as mapped (0).
+    straight_roads: int = 0
 
     # --- terrain ---------------------------------------------------------
     # Multiplies how much of a forest polygon actually becomes trees.
@@ -107,6 +111,7 @@ LIMITS = {
     # plus its walls. MAX_BUILDING_DIMENSION in the reader is 300.
     "min_size": (3, 40),
     "align_streets": (0, 1),
+    "straight_roads": (0, 1),
     "max_size": (8, 250),
     "apartment_footprint": (16, 4000),
     "apartment_chance": (0.0, 1.0),
