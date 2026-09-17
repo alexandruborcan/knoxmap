@@ -7,6 +7,13 @@
   is checked against GitHub's fingerprint and goes in when KnoxMap restarts -
   including an older one, for when a new release breaks something. On an older
   version automatic updates stay off until you choose the newest again.
+- Big maps no longer die with "MemoryError" halfway through drawing. Setup
+  now insists on a 64-bit Python - a 32-bit one can only use about 2 GB
+  however much the PC has - and makes an environment built by a 32-bit Python
+  again; the window lists 64-bit Python among the things setup checks. A map
+  too big for the memory there is says so before it starts, with what it
+  needs and what is free, and drawing the gardens takes a fraction of the
+  memory it did.
 - **Reset loot**, in the game: right-click the ground for "Reset loot" and
   pick this building or everything within 30 tiles, and those containers are
   emptied and filled again from their loot tables. A map installed again keeps

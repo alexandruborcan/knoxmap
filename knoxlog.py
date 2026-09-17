@@ -137,7 +137,12 @@ def version() -> str:
     return "unknown"
 
 
-def _memory() -> str:
+def memory_status() -> tuple[int, int, int] | None:
+    """(total, free, room this process has left) in bytes, or None elsewhere.
+
+    The last one is the address space: on a 32-bit Python it is about 2 GB
+    however much memory the PC has, which is what a big map runs out of.
+    """
     try:
         import ctypes
 
@@ -150,9 +155,17 @@ def _memory() -> str:
         st = Status()
         st.length = ctypes.sizeof(Status)
         if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
-            return f"{st.total / 2**30:.1f} GB, {st.avail / 2**30:.1f} GB free"
+            return int(st.total), int(st.avail), int(st.virtavail)
     except Exception:  # noqa: BLE001 - not Windows
         pass
+    return None
+
+
+def _memory() -> str:
+    status = memory_status()
+    if status:
+        total, free, _room = status
+        return f"{total / 2**30:.1f} GB, {free / 2**30:.1f} GB free"
     return "unknown"
 
 

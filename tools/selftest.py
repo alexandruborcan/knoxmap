@@ -191,6 +191,64 @@ def check_repair(check, out: str) -> None:
           "a sound project is left exactly as it is")
 
 
+def check_memory_guard(check) -> None:
+    """A map too big for the memory there is says so, instead of dying with
+    MemoryError partway through drawing it (a 32-bit Python has about 2 GB)."""
+    import app as knoxapp
+    import knoxlog
+
+    real = knoxlog.memory_status
+    try:
+        knoxlog.memory_status = lambda: (15_000_000_000, 5_300_000_000, 2_100_000_000)
+
+        class Small:                      # a 32-bit Python
+            maxsize = 2 ** 32 - 1
+
+        was, knoxapp.sys = knoxapp.sys, Small
+        try:
+            big = knoxapp._too_big_for_memory(5400, 6000)
+            small = knoxapp._too_big_for_memory(1200, 1200)
+        finally:
+            knoxapp.sys = was
+        check(big and "32-bit" in big and "Setup.bat" in big and not small,
+              "a map too big for a 32-bit Python is refused with a way out")
+        knoxlog.memory_status = lambda: (15_000_000_000, 900_000_000, 140_000_000_000)
+        tight = knoxapp._too_big_for_memory(5400, 6000)
+        check(tight and "free" in tight, "a map too big for the free memory is refused")
+    finally:
+        knoxlog.memory_status = real
+
+
+def check_box_any(check) -> None:
+    """The reach test the gardens use works a strip at a time, to keep a town's
+    summed-area table out of memory; it must still answer the same."""
+    import numpy as np
+
+    from generator.renderer import _box_any
+    import generator.renderer as renderer
+
+    def whole_map(mask, radius):
+        h, w = mask.shape
+        pad = np.pad(mask.astype(np.int32), radius + 1)
+        ii = pad.cumsum(0).cumsum(1)
+        k = 2 * radius + 1
+        return (ii[k:k + h, k:k + w] - ii[0:h, k:k + w]
+                - ii[k:k + h, 0:w] + ii[0:h, 0:w]) > 0
+
+    rng = np.random.default_rng(3)
+    was = renderer.BOX_STRIP_ROWS
+    same = True
+    try:
+        for shape, radius, strip in (((300, 200), 3, 64), ((97, 61), 0, 7),
+                                     ((512, 300), 12, 512), ((200, 200), 1, 3)):
+            renderer.BOX_STRIP_ROWS = strip
+            mask = rng.random(shape) < 0.02
+            same = same and np.array_equal(_box_any(mask, radius), whole_map(mask, radius))
+    finally:
+        renderer.BOX_STRIP_ROWS = was
+    check(same, "the gardens' reach test gives the same answer strip by strip")
+
+
 def check_mapstate(check, out: str) -> None:
     """What a newer KnoxMap needs redone on an older map, and what it leaves
     alone (knoxbuild/mapstate.py)."""
@@ -552,6 +610,8 @@ def main(argv: list[str]) -> int:
         check_missing_drive(check)
         check_straight_roads(check)
         check_mapstate(check, out)
+        check_memory_guard(check)
+        check_box_any(check)
 
         print("error log")
         import zipfile

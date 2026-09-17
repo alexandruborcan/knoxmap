@@ -1551,16 +1551,34 @@ LONG_GRASS_SHARE = 0.0
 GRASS_COLOURS = (C.DARK_GRASS, C.MEDIUM_GRASS, C.LIGHT_GRASS)
 
 
+# Rows of the map worked on at a time in _box_any. A whole town's summed-area
+# table is four bytes a tile twice over - a 6000 x 5400 map needed a third of a
+# gigabyte for one call, which is what ran a 32-bit Python out of memory. In
+# strips it is a few megabytes, for the same answer.
+BOX_STRIP_ROWS = 512
+
+
 def _box_any(mask, radius: int):
     """True wherever `mask` is true within `radius` tiles (a square reach)."""
     import numpy as np
 
     h, w = mask.shape
-    pad = np.pad(mask.astype(np.int32), radius + 1)
-    ii = pad.cumsum(0).cumsum(1)
+    out = np.zeros((h, w), dtype=bool)
     k = 2 * radius + 1
-    total = ii[k:k + h, k:k + w] - ii[0:h, k:k + w] - ii[k:k + h, 0:w] + ii[0:h, 0:w]
-    return total > 0
+    for top in range(0, h, BOX_STRIP_ROWS):
+        bottom = min(h, top + BOX_STRIP_ROWS)
+        # The strip, plus the rows on either side that can reach into it. Past
+        # the top and bottom of the map there is nothing, which is what the
+        # padding stands for, exactly as it did for the whole map at once.
+        y0, y1 = max(0, top - radius), min(h, bottom + radius)
+        block = np.pad(mask[y0:y1].astype(np.int32), radius + 1)
+        ii = block.cumsum(0)
+        ii = ii.cumsum(1)
+        rows = y1 - y0
+        total = (ii[k:k + rows, k:k + w] - ii[0:rows, k:k + w]
+                 - ii[k:k + rows, 0:w] + ii[0:rows, 0:w])
+        out[top:bottom] = total[top - y0:bottom - y0] > 0
+    return out
 
 
 def _paint_gardens(veg: Image.Image, landscape: Image.Image,
@@ -1578,13 +1596,17 @@ def _paint_gardens(veg: Image.Image, landscape: Image.Image,
             if len(ring) >= 3:
                 hd.polygon(ring, fill=1)
     house = np.array(houses, dtype=bool)
+    del houses
     ground = np.array(landscape.convert("RGB"))
     grass = np.zeros(house.shape, dtype=bool)
     for colour in GRASS_COLOURS:
         grass |= np.all(ground == colour, axis=2)
+    del ground                       # a town's worth of pixels; let it go
     vegp = np.array(veg.convert("RGB"))
     empty = np.all(vegp == 0, axis=2)
+    del vegp
     lawn = grass & empty & ~house
+    del empty
     paved_near = _box_any(~grass & ~house, GARDEN_CLEAR_OF_PAVING)
 
     yard = lawn & _box_any(house, GARDEN_REACH_TILES)         & ~_box_any(house, GARDEN_CLEAR_OF_HOUSE) & ~paved_near
@@ -1606,17 +1628,21 @@ def _paint_gardens(veg: Image.Image, landscape: Image.Image,
             planted += 1
 
     # Shrubs: lawn right against a wall, not in front of the paving.
+    # The dice are rolled for the tiles in question, not for every tile on the
+    # map: one roll each way over a town is a quarter of a gigabyte of floats.
     beside = lawn & _box_any(house, 1) & ~house & ~paved_near
-    ys, xs = np.nonzero(beside & (rng.random(house.shape) < SHRUB_CHANCE * density))
-    for x, y in zip(xs.tolist(), ys.tolist()):
+    ys, xs = np.nonzero(beside)
+    keep = rng.random(len(xs)) < SHRUB_CHANCE * density
+    for x, y in zip(xs[keep].tolist(), ys[keep].tolist()):
         px[x, y] = C.BUSHES
 
     open_grass = lawn & ~beside & ~_box_any(house, 0)
-    roll = rng.random(house.shape)
+    ys, xs = np.nonzero(open_grass)
+    roll = rng.random(len(xs))
     for colour, share, lo in ((C.SHORT_GRASS, SHORT_GRASS_SHARE, 0.0),
                               (C.GRASS_ON_DARK, LONG_GRASS_SHARE, SHORT_GRASS_SHARE)):
-        ys, xs = np.nonzero(open_grass & (roll >= lo) & (roll < lo + share))
-        for x, y in zip(xs.tolist(), ys.tolist()):
+        pick = (roll >= lo) & (roll < lo + share)
+        for x, y in zip(xs[pick].tolist(), ys[pick].tolist()):
             if px[x, y] == C.VEG_NOTHING:
                 px[x, y] = colour
     return planted

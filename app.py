@@ -464,6 +464,39 @@ def _normalise_bbox(south: float, west: float, north: float,
     return (south, west, north, east), None
 
 
+# Drawing a map holds several pictures of it at once - the ground, the
+# vegetation, the masks the gardens and the paving are worked out from. Measured
+# on real towns (a 2400 x 2400 Paris peaked at 0.54 GB, a 1200 x 900 Manhattan
+# at 0.12 GB), that is about this much, plus what the program itself takes.
+BYTES_PER_TILE = 80
+BASE_BYTES = 150e6
+
+
+def _too_big_for_memory(tiles_w: float, tiles_h: float) -> str | None:
+    """Why this map will not fit in memory, or None when it should.
+
+    A 32-bit Python can only use about 2 GB however much the PC has, and a map
+    of a few square kilometres needs more: it used to get halfway through and
+    fail with "MemoryError".
+    """
+    needed = tiles_w * tiles_h * BYTES_PER_TILE + BASE_BYTES
+    status = knoxlog.memory_status()
+    if not status:
+        return None
+    _total, free, room = status
+    smaller = "Pick a smaller area, or a larger scale (metres per tile)."
+    if sys.maxsize <= 2 ** 32 and needed > room * 0.8:
+        return (f"This map needs about {needed / 1e9:.1f} GB of memory, and KnoxMap is "
+                f"running 32-bit Python, which can only use about 2 GB however much this "
+                f"PC has. Close KnoxMap and run Setup.bat again: it fetches a 64-bit "
+                f"Python and makes its environment again. " + smaller)
+    if needed > min(free, room) * 0.8:
+        return (f"This map needs about {needed / 1e9:.1f} GB of memory and only "
+                f"{min(free, room) / 1e9:.1f} GB is free. Close a few things and try "
+                f"again. " + smaller)
+    return None
+
+
 @app.route("/api/generate", methods=["POST"])
 def generate():
     data = _json_body()
@@ -512,6 +545,9 @@ def generate():
             "error": f"Requested map is too large (~{int(approx_w)}×"
                      f"{int(approx_h)} tiles). Pick a smaller area or a larger "
                      f"meters-per-tile scale."}), 400
+    too_big = _too_big_for_memory(approx_w, approx_h)
+    if too_big:
+        return jsonify({"error": too_big}), 400
 
     t0 = time.time()
     log.info("generate %s: %.5f,%.5f,%.5f,%.5f at %s m/tile, %.2f km2", map_name,
@@ -849,6 +885,12 @@ def api_setup_status():
          "label": "Project Zomboid Build 42",
          "fix": "Your game looks like Build 41. In Steam choose the Build 42 "
                 "(unstable) branch under Properties > Betas."},
+        # A 32-bit Python can only use about 2 GB, and a town-sized map needs
+        # more: it fails part-way through with "MemoryError".
+        {"id": "python64", "ok": sys.maxsize > 2 ** 32, "label": "64-bit Python",
+         "fix": "KnoxMap is running 32-bit Python, which can only use about 2 GB of "
+                "memory, so anything past a few square kilometres fails. Close KnoxMap "
+                "and run Setup.bat again: it fetches a 64-bit Python."},
         {"id": "tiles", "ok": tiles >= 400, "label": "Tile artwork from your game",
          "fix": "Run Setup.bat to extract it from your install."},
         # Added to the tools after KnoxMap 1.0's first setups: without them a

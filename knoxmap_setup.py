@@ -343,6 +343,15 @@ def main() -> int:
             stream.reconfigure(errors="replace")
     say("KnoxMap setup")
     say("=============")
+    if sys.maxsize <= 2 ** 32:
+        # 2 GB is all a 32-bit process can address, and a town-sized map needs
+        # more: it dies part-way through with "MemoryError".
+        say("")
+        say("      !! This is a 32-bit Python. It can only use about 2 GB of memory,")
+        say("         so maps of more than a few square kilometres will fail with")
+        say("         'MemoryError'. Close this, run Setup.bat again, and KnoxMap")
+        say("         will fetch a 64-bit Python for itself.")
+        say("")
     tools = ensure_mapping_tools()
     cli_ok = ensure_patched_cli(tools)
     game = find_game()
