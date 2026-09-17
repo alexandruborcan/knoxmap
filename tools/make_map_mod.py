@@ -242,6 +242,24 @@ SPAWN_SELECTOR_MAX_POIS = 80
 SPAWN_SELECTOR_STYLES = {"text-building": "landmark", "text-place": "landmark"}
 
 
+def write_reset_loot(mod_root: str) -> bool:
+    """Ship the "Reset loot" right-click menu with the map.
+
+    The game fills a container once and remembers it, so a map installed again
+    keeps the loot it rolled the first time and the only cure used to be a new
+    save. knoxbuild/lua/resetloot.lua puts it back, building by building. Every
+    KnoxMap map carries the same file and the first one loaded claims it.
+    """
+    source = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "knoxbuild", "lua", "resetloot.lua")
+    if not os.path.exists(source):
+        return False
+    lua_dir = os.path.join(mod_root, "common", "media", "lua", "client", "KnoxMap")
+    os.makedirs(lua_dir, exist_ok=True)
+    shutil.copy2(source, os.path.join(lua_dir, "KnoxMapResetLoot.lua"))
+    return True
+
+
 def write_spawn_selector(project_dir: str, mod_root: str, mod_id: str,
                          name: str) -> int:
     """Put this map into Spawn Selector, if the player has that mod.
@@ -477,6 +495,7 @@ def package(project_dir: str, name: str, mod_id: str,
 
     write_attribution(project_dir, mod_root, name)
     n_pois = write_spawn_selector(project_dir, mod_root, mod_id, name)
+    reset_loot = write_reset_loot(mod_root)
     extra_names = [os.path.basename(e) for e in extras]
     if n_spawns:
         extra_names.append(f"spawnpoints.lua ({n_spawns} spawn points)")
@@ -486,6 +505,8 @@ def package(project_dir: str, name: str, mod_id: str,
         extra_names.append(f"objects.lua ({zone_counts.get('ParkingStall', 0)} parking stalls, "
                            f"{zone_counts.get('TownZone', 0)} town zones)")
     extra_names.append(f"Spawn Selector support ({n_pois} places)")
+    if reset_loot:
+        extra_names.append("Reset loot menu")
     return mod_root, sum(1 for c in cells if c.endswith(".lotheader")), extra_names
 
 

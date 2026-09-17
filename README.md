@@ -179,6 +179,12 @@ second without rebuilding, then compile again so the game sees the change.
 
 ## Good to know
 
+- **Fresh loot without a new save.** The game fills a container once and
+  remembers it, so a map installed again keeps what it rolled the first time.
+  In game, right-click the ground and pick **Reset loot** - this building, or
+  everything within 30 tiles - and those containers are filled again from
+  their loot tables. It asks first, because what is in them is thrown away.
+  Single player only.
 - **An update does not mean starting over.** Each step of a map records the
   KnoxMap that ran it. Open a map again under *Your maps* and, if a newer
   release changed anything it uses, the window offers to upgrade it and runs

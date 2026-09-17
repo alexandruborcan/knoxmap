@@ -667,6 +667,20 @@ def main(argv: list[str]) -> int:
         check(selector and "Selftest School" in selector[0] and "OnGameBoot" in selector[0]
               and selector[0].count("{") == selector[0].count("}"),
               "Spawn Selector gets the town and its landmarks")
+        loot = os.path.join(mod_root, "common", "media", "lua", "client", "KnoxMap",
+                            "KnoxMapResetLoot.lua")
+        text = open(loot, encoding="utf-8").read() if os.path.exists(loot) else ""
+        ok = ("OnFillWorldObjectContextMenu" in text and "ItemPicker.fillContainer" in text
+              and "isClient()" in text)
+        try:                      # a real parse when a Lua runtime is installed
+            import lupa
+            lupa.LuaRuntime().compile(text)
+        except ImportError:
+            pass
+        except Exception as exc:  # noqa: BLE001 - a syntax error in the shipped Lua
+            ok = False
+            print(f"        {exc}")
+        check(ok, "the Reset loot menu is installed with the map")
     except Exception:
         import traceback
         traceback.print_exc()

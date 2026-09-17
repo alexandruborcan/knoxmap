@@ -7,6 +7,13 @@
   is checked against GitHub's fingerprint and goes in when KnoxMap restarts -
   including an older one, for when a new release breaks something. On an older
   version automatic updates stay off until you choose the newest again.
+- **Reset loot**, in the game: right-click the ground for "Reset loot" and
+  pick this building or everything within 30 tiles, and those containers are
+  emptied and filled again from their loot tables. A map installed again keeps
+  the loot it rolled the first time otherwise, and the only cure was a new
+  save. It asks first - anything stored in them is lost - and leaves vehicles,
+  corpses and your own inventory alone. Single player only, and it comes with
+  every map KnoxMap installs.
 - **Your maps**, listed in the window: open one made earlier and build,
   compile or install it again without drawing it from scratch. A map an older
   release made says so - "This map was made with an earlier release. Do you

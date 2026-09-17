@@ -1083,7 +1083,9 @@ document.getElementById('installBtn').addEventListener('click', async () => {
     } catch (_) { /* the install itself worked; the tip is optional */ }
     note('installNote',
          `Installed ${data.cells} cells to ${data.modRoot}. Enable "${data.title}" `
-         + 'in the game\'s Mods menu, then start a NEW save.' + lifts, 'ok');
+         + 'in the game\'s Mods menu, then start a NEW save. In a save you are '
+         + 'already playing, right-click the ground and pick "Reset loot" for '
+         + 'fresh loot in a building.' + lifts, 'ok');
   } catch (err) {
     note('installNote', err.message, 'bad');
     btn.disabled = false;
