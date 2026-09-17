@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.5
+
+- A version menu: click the version at the top of the window for every
+  KnoxMap release on GitHub, with what is in each. The one you pick downloads,
+  is checked against GitHub's fingerprint and goes in when KnoxMap restarts -
+  including an older one, for when a new release breaks something. On an older
+  version automatic updates stay off until you choose the newest again.
+
 ## 1.3.4
 
 - The in-game map (M) shows the roads, buildings and water, not just street

@@ -16,7 +16,20 @@
 <header class="topbar">
   <img src="/static/logo.svg" alt="" class="logo"/>
   <h1>KnoxMap</h1>
-  <span class="version" id="appVersion" title="The KnoxMap version you are running">v{{ version }}</span>
+  <span class="version-wrap">
+    <button type="button" class="version" id="appVersion" aria-haspopup="true" aria-expanded="false"
+            title="The KnoxMap version you are running. Click to choose another">v{{ version }}</button>
+    <div id="versionMenu" class="version-menu" role="dialog" aria-label="KnoxMap versions" hidden>
+      <div class="version-menu-head">
+        <b>KnoxMap versions</b>
+        <button type="button" class="version-menu-close" aria-label="Close">&times;</button>
+      </div>
+      <p class="hint">Any release from GitHub. The one you pick downloads now and goes in
+        when KnoxMap restarts; your maps and settings stay.</p>
+      <ul id="versionList" class="version-list"><li class="hint">Asking GitHub…</li></ul>
+      <div id="versionNote" class="hint"></div>
+    </div>
+  </span>
   <span class="byline">real places as Project Zomboid maps &middot; by euclid80tr &middot; <a href="https://discord.gg/ePM8dSxPm7" target="_blank" rel="noopener">discord</a> &middot; <a href="#" id="reportLink">report a problem</a></span>
   <span id="updateNote" class="update-note" hidden></span>
 </header>

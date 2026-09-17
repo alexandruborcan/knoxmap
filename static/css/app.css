@@ -295,3 +295,30 @@ input[readonly] { background: var(--bg); color: var(--muted); }
 .update-note button { font: inherit; font-size: 12px; color: var(--accent-ink); background: var(--accent);
   border: 0; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-weight: 600; }
 .update-note button:disabled { opacity: .6; cursor: default; }
+
+/* ---- version menu ------------------------------------------------------------ */
+.version-wrap { position: relative; }
+button.version { background: transparent; cursor: pointer; font: inherit; font-family: var(--mono); font-size: 12px; }
+button.version:hover, button.version[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+.version-menu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 2100; width: min(380px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 80px)); overflow: auto; background: var(--panel);
+  border: 1px solid var(--line-strong); border-radius: 6px; padding: 10px 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }
+.version-menu[hidden] { display: none; }
+.version-menu-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.version-menu-close { background: none; border: 0; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
+.version-menu .hint { margin: 4px 0 8px; }
+.version-list { list-style: none; margin: 0; padding: 0; }
+.version-list > li { border-top: 1px solid var(--line); padding: 7px 0; }
+.version-row { display: flex; align-items: center; gap: 8px; }
+.version-row .v { font-family: var(--mono); font-weight: 600; }
+.version-row .date { color: var(--muted); font-size: 12px; }
+.version-row .tag { font-size: 11px; border-radius: 3px; padding: 0 5px; border: 1px solid var(--line-strong); color: var(--muted); }
+.version-row .tag.now { color: var(--accent); border-color: var(--accent); }
+.version-row button { margin-left: auto; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  color: var(--accent-ink); background: var(--accent); border: 0; border-radius: 4px; padding: 3px 10px; }
+.version-row button.older { color: var(--text); background: transparent; border: 1px solid var(--line-strong); }
+.version-row button:disabled { opacity: .5; cursor: default; }
+.version-list details { margin-top: 3px; font-size: 12px; color: var(--muted); }
+.version-list details summary { cursor: pointer; }
+.version-list details pre { white-space: pre-wrap; font: inherit; margin: 4px 0 0; }

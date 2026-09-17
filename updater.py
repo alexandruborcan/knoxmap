@@ -17,6 +17,11 @@ Only KnoxMap's own files are touched. Maps (output/), logs, the Python
 environment, the map tools and the tile cache are never in a release zip, and
 nothing is written outside the KnoxMap folder.
 
+Any other version can be chosen in the window too (click the version at the
+top): choose() downloads that release the same way and it goes in on restart,
+older ones included. Choosing an older version turns automatic updates off, so
+it is not updated straight back; choosing the newest turns them on again.
+
 A git checkout never updates itself (it has git for that), and the check can
 be turned off with "auto_update": false in knoxmap_config.json or
 KNOXMAP_NO_UPDATE=1.
@@ -39,6 +44,8 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 REPO = "spytheeuclidean-a11y/knoxmap"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
+API_RELEASES = f"https://api.github.com/repos/{REPO}/releases?per_page=50"
+ASSET_NAME = re.compile(r"KnoxMap-v[\w.]+\.zip")
 UPDATE_DIR = BASE_DIR / "update"
 STAGED = UPDATE_DIR / "staged.json"
 MANIFEST = BASE_DIR / ".knoxmap_files.json"
@@ -71,8 +78,15 @@ def is_newer(latest: str, current: str) -> bool:
     return _parse(latest) > _parse(current)
 
 
+def managed() -> bool:
+    """Whether this copy may replace its own files: not a git checkout, and
+    not told to leave itself alone."""
+    return os.environ.get("KNOXMAP_NO_UPDATE") != "1" and not (BASE_DIR / ".git").exists()
+
+
 def enabled() -> bool:
-    if os.environ.get("KNOXMAP_NO_UPDATE") == "1" or (BASE_DIR / ".git").exists():
+    """Whether new releases are fetched on their own."""
+    if not managed():
         return False
     try:
         import knoxpaths
@@ -86,6 +100,7 @@ def status() -> dict:
         out = dict(_state)
     out["current"] = current_version()
     out["enabled"] = enabled()
+    out["managed"] = managed()
     return out
 
 
@@ -110,6 +125,9 @@ def check(force: bool = False) -> dict:
     current = current_version()
     try:
         staged = _read_staged()
+        if staged and staged.get("chosen") and Path(staged["zip"]).exists():
+            _set(state="ready", latest=staged["version"], notes=staged.get("notes", ""))
+            return status()       # a version chosen in the window waits for its restart
         if staged and is_newer(staged["version"], current) and Path(staged["zip"]).exists():
             _set(state="ready", latest=staged["version"], notes=staged.get("notes", ""))
             return status()
@@ -119,48 +137,128 @@ def check(force: bool = False) -> dict:
         r.raise_for_status()
         release = r.json()
         latest = (release.get("tag_name") or "").lstrip("v")
-        notes = release.get("body") or ""
         if not is_newer(latest, current):
             _set(state="current", latest=latest, notes="")
             return status()
-        asset = next((a for a in release.get("assets", [])
-                      if re.fullmatch(r"KnoxMap-v[\w.]+\.zip", a.get("name", ""))), None)
-        if asset is None:
-            _set(state="error", latest=latest, error="the release has no KnoxMap zip")
-            return status()
-        _set(state="downloading", latest=latest, notes=notes)
-        _log().info("update: downloading KnoxMap %s (this is %s)", latest, current)
-        UPDATE_DIR.mkdir(exist_ok=True)
-        target = UPDATE_DIR / asset["name"]
-        partial = target.with_suffix(".part")
-        h = hashlib.sha256()
-        with requests.get(asset["browser_download_url"], headers={"User-Agent": USER_AGENT},
-                          stream=True, timeout=60) as dl:
-            dl.raise_for_status()
-            with open(partial, "wb") as f:
-                for chunk in dl.iter_content(1 << 16):
-                    f.write(chunk)
-                    h.update(chunk)
-        digest = (asset.get("digest") or "").lower()
-        if digest.startswith("sha256:") and digest.split(":", 1)[1] != h.hexdigest():
-            partial.unlink(missing_ok=True)
-            raise RuntimeError("the download does not match GitHub's fingerprint")
-        with zipfile.ZipFile(partial) as z:
-            bad = z.testzip()
-            if bad is not None:
-                raise RuntimeError(f"the download is damaged ({bad})")
-            if "KnoxMap/knoxmap.py" not in z.namelist():
-                raise RuntimeError("the download is not a KnoxMap release")
-        partial.replace(target)
-        STAGED.write_text(json.dumps({"version": latest, "zip": str(target), "notes": notes,
-                                      "sha256": h.hexdigest()}), encoding="utf-8")
-        for old in UPDATE_DIR.glob("KnoxMap-v*.zip"):
-            if old != target:
-                old.unlink(missing_ok=True)
-        _log().info("update: KnoxMap %s is ready and applies on the next start", latest)
-        _set(state="ready", latest=latest, notes=notes)
+        _stage(release, chosen=False)
     except Exception as exc:  # noqa: BLE001 - offline, rate-limited, anything: try later
         _log().warning("update check failed: %s", exc)
+        _set(state="error", error=str(exc))
+    return status()
+
+
+def _asset(release: dict) -> dict | None:
+    return next((a for a in release.get("assets", [])
+                 if ASSET_NAME.fullmatch(a.get("name", ""))), None)
+
+
+def _stage(release: dict, chosen: bool) -> None:
+    """Download a release's zip into update/, check it against GitHub's
+    fingerprint and mark it to go in on the next start."""
+    import requests
+
+    version = (release.get("tag_name") or "").lstrip("v")
+    notes = release.get("body") or ""
+    asset = _asset(release)
+    if asset is None:
+        raise RuntimeError(f"release {version} has no KnoxMap zip")
+    _set(state="downloading", latest=version, notes=notes)
+    _log().info("update: downloading KnoxMap %s (this is %s)%s", version, current_version(),
+                ", chosen in the window" if chosen else "")
+    UPDATE_DIR.mkdir(exist_ok=True)
+    target = UPDATE_DIR / asset["name"]
+    partial = target.with_suffix(".part")
+    h = hashlib.sha256()
+    with requests.get(asset["browser_download_url"], headers={"User-Agent": USER_AGENT},
+                      stream=True, timeout=60) as dl:
+        dl.raise_for_status()
+        with open(partial, "wb") as f:
+            for chunk in dl.iter_content(1 << 16):
+                f.write(chunk)
+                h.update(chunk)
+    digest = (asset.get("digest") or "").lower()
+    if digest.startswith("sha256:") and digest.split(":", 1)[1] != h.hexdigest():
+        partial.unlink(missing_ok=True)
+        raise RuntimeError("the download does not match GitHub's fingerprint")
+    with zipfile.ZipFile(partial) as z:
+        bad = z.testzip()
+        if bad is not None:
+            raise RuntimeError(f"the download is damaged ({bad})")
+        if "KnoxMap/knoxmap.py" not in z.namelist():
+            raise RuntimeError("the download is not a KnoxMap release")
+    partial.replace(target)
+    STAGED.write_text(json.dumps({"version": version, "zip": str(target), "notes": notes,
+                                  "sha256": h.hexdigest(), "chosen": chosen}),
+                      encoding="utf-8")
+    for old in UPDATE_DIR.glob("KnoxMap-v*.zip"):
+        if old != target:
+            old.unlink(missing_ok=True)
+    _log().info("update: KnoxMap %s is ready and applies on the next start", version)
+    _set(state="ready", latest=version, notes=notes)
+
+
+# --- choosing a version ----------------------------------------------------------
+
+_releases_cache: dict = {"at": 0.0, "releases": None}
+
+
+def _fetch_releases() -> list[dict]:
+    import requests
+
+    if _releases_cache["releases"] is not None and time.time() - _releases_cache["at"] < 600:
+        return _releases_cache["releases"]
+    r = requests.get(API_RELEASES, headers={"User-Agent": USER_AGENT,
+                                            "Accept": "application/vnd.github+json"},
+                     timeout=15)
+    r.raise_for_status()
+    found = [rel for rel in r.json()
+             if not rel.get("draft") and not rel.get("prerelease") and _asset(rel)]
+    found.sort(key=lambda rel: _parse(rel.get("tag_name", "")), reverse=True)
+    _releases_cache.update(at=time.time(), releases=found)
+    return found
+
+
+def releases() -> dict:
+    """Every KnoxMap release there is to choose from, newest first."""
+    current = current_version()
+    out = []
+    for rel in _fetch_releases():
+        version = (rel.get("tag_name") or "").lstrip("v")
+        out.append({"version": version,
+                    "date": (rel.get("published_at") or "")[:10],
+                    "notes": (rel.get("body") or "")[:4000],
+                    "current": _parse(version) == _parse(current),
+                    "latest": False})
+    if out:
+        out[0]["latest"] = True
+    return {"current": current, "managed": managed(), "auto_update": enabled(),
+            "releases": out}
+
+
+def choose(version: str) -> dict:
+    """Download release `version` to go in on the next start. Progress is in
+    status()."""
+    if not managed():
+        raise RuntimeError("this copy of KnoxMap is a git checkout; switch versions with git")
+    with _lock:
+        if _state["state"] in ("checking", "downloading"):
+            raise RuntimeError("a download is already running")
+        _state.update(state="downloading", error=None, latest=version)
+    try:
+        available = _fetch_releases()
+        found = [rel for rel in available if _parse(rel.get("tag_name", "")) == _parse(version)]
+        if not found:
+            raise RuntimeError(f"there is no release {version}")
+        # An older version stays put: no automatic update straight back to the
+        # newest. Choosing the newest lets them run again.
+        import knoxpaths
+        config = knoxpaths.load_config()
+        config["auto_update"] = found[0] is available[0]
+        with open(knoxpaths.CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+        _stage(found[0], chosen=True)
+    except Exception as exc:  # noqa: BLE001
+        _log().warning("choosing KnoxMap %s failed: %s", version, exc)
         _set(state="error", error=str(exc))
     return status()
 
@@ -200,10 +298,15 @@ def apply_staged() -> bool:
     """Install a downloaded update, if there is one. Returns True when files
     changed, so the caller restarts on the new code."""
     staged = _read_staged()
-    if not staged or not enabled():
+    if not staged or not managed():
+        return False
+    chosen = bool(staged.get("chosen"))
+    if not chosen and not enabled():
         return False
     zip_path = Path(staged.get("zip", ""))
-    if not zip_path.exists() or not is_newer(staged["version"], current_version()):
+    wanted = (_parse(staged["version"]) != _parse(current_version()) if chosen
+              else is_newer(staged["version"], current_version()))
+    if not zip_path.exists() or not wanted:
         STAGED.unlink(missing_ok=True)
         return False
     log = _log()

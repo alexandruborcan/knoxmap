@@ -267,7 +267,172 @@ const fx = (() => {
     setTimeout(watchUpdates, st.state === 'downloading' ? 5000 : 10 * 60 * 1000);
   }
 
+  // ---- version menu ---------------------------------------------------------------
+  // Click the version at the top for every release on GitHub. The one chosen
+  // downloads now (updater.py checks it against GitHub's fingerprint) and goes
+  // in on restart - older ones too, for when a new release breaks something.
+
+  const VERSION_MENU_SINCE = [1, 3, 5];   // the first release with this menu
+
+  const versionParts = v => (String(v).match(/\d+/g) || []).map(Number);
+  function versionBefore(a, b) {
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+      if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) < (b[i] || 0);
+    }
+    return false;
+  }
+
+  function versionNote(text, cls) {
+    const note = $('#versionNote');
+    note.className = 'hint' + (cls ? ' ' + cls : '');
+    note.textContent = text;
+  }
+
+  async function waitForVersion(version) {
+    let st;
+    for (;;) {
+      await new Promise(r => setTimeout(r, 1500));
+      try { st = await (await fetch('/api/update')).json(); } catch (_) { continue; }
+      if (st.state === 'downloading') continue;
+      break;
+    }
+    if (st.state !== 'ready' || st.latest !== version) {
+      throw new Error(st.error || `KnoxMap ${version} could not be downloaded.`);
+    }
+    const note = $('#versionNote');
+    note.className = 'hint';
+    note.innerHTML = '<span></span> <button type="button">Restart now</button>';
+    note.querySelector('span').textContent = `KnoxMap ${version} is ready.`;
+    note.querySelector('button').addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      e.target.textContent = 'Restarting...';
+      try {
+        const res = await fetch('/api/update/restart', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      } catch (err) {
+        e.target.disabled = false;
+        e.target.textContent = 'Restart now';
+        versionNote(err.message, 'bad');
+      }
+    });
+    watchUpdates();
+  }
+
+  async function chooseVersion(item, button, current) {
+    const older = versionBefore(versionParts(item.version), versionParts(current));
+    if (older && versionBefore(versionParts(item.version), VERSION_MENU_SINCE)) {
+      const ok = window.confirm(
+        `KnoxMap ${item.version} has no version menu. To come back, download the newest ` +
+        'KnoxMap from GitHub, or set "auto_update" to true in knoxmap_config.json. ' +
+        `Go back to ${item.version}?`);
+      if (!ok) return;
+    }
+    for (const b of document.querySelectorAll('#versionList button')) b.disabled = true;
+    button.textContent = 'Downloading...';
+    versionNote(`Downloading KnoxMap ${item.version} from GitHub...`);
+    try {
+      const res = await fetch('/api/versions/install', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: item.version }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await waitForVersion(item.version);
+      button.textContent = 'Downloaded';
+    } catch (err) {
+      versionNote(err.message, 'bad');
+      openVersions(true);
+    }
+  }
+
+  async function openVersions(keepNote) {
+    const list = $('#versionList');
+    list.innerHTML = '<li class="hint">Asking GitHub…</li>';
+    if (!keepNote) versionNote('');
+    let data;
+    try {
+      const res = await fetch('/api/versions');
+      data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    } catch (err) {
+      list.innerHTML = '';
+      versionNote(err.message, 'bad');
+      return;
+    }
+    list.innerHTML = '';
+    if (!data.managed) {
+      versionNote('This copy of KnoxMap is a git checkout: switch versions with git.');
+    } else if (!data.auto_update && !keepNote) {
+      versionNote('Automatic updates are off while you are on an older version. ' +
+                  'Choose the newest to turn them back on.');
+    }
+    for (const item of data.releases) {
+      const li = document.createElement('li');
+      const row = document.createElement('div');
+      row.className = 'version-row';
+      const v = document.createElement('span');
+      v.className = 'v';
+      v.textContent = `v${item.version}`;
+      const date = document.createElement('span');
+      date.className = 'date';
+      date.textContent = item.date;
+      row.append(v, date);
+      if (item.current) {
+        const tag = document.createElement('span');
+        tag.className = 'tag now';
+        tag.textContent = 'this one';
+        row.append(tag);
+      } else if (item.latest) {
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.textContent = 'newest';
+        row.append(tag);
+      }
+      if (!item.current) {
+        const older = versionBefore(versionParts(item.version), versionParts(data.current));
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = older ? 'Go back' : 'Update';
+        if (older) button.classList.add('older');
+        button.disabled = !data.managed;
+        button.addEventListener('click', () => chooseVersion(item, button, data.current));
+        row.append(button);
+      }
+      li.append(row);
+      if (item.notes) {
+        const details = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = "What's in it";
+        const pre = document.createElement('pre');
+        pre.textContent = item.notes;
+        details.append(summary, pre);
+        li.append(details);
+      }
+      list.append(li);
+    }
+  }
+
+  function versionMenu() {
+    const badge = $('#appVersion');
+    const menu = $('#versionMenu');
+    if (!badge || !menu) return;
+    const close = () => { menu.hidden = true; badge.setAttribute('aria-expanded', 'false'); };
+    badge.addEventListener('click', () => {
+      if (!menu.hidden) { close(); return; }
+      menu.hidden = false;
+      badge.setAttribute('aria-expanded', 'true');
+      openVersions();
+    });
+    menu.querySelector('.version-menu-close').addEventListener('click', close);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+    document.addEventListener('click', e => {
+      if (!menu.hidden && !menu.contains(e.target) && e.target !== badge) close();
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
+    versionMenu();
     setTimeout(watchUpdates, 8000);
     presetCards();
     $('.hint-close')?.addEventListener('click', () => $('#map-hint')?.remove());

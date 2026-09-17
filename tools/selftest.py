@@ -309,6 +309,17 @@ def check_updater(check, work: str) -> None:
               "an update leaves maps and the Python environment alone and stays in its folder")
         check(not updater.STAGED.exists() and not zip_path.exists() and not updater.apply_staged(),
               "an update is applied once")
+        # An older version goes in only when it was chosen in the version menu.
+        old_zip = update_dir / "KnoxMap-v0.5.zip"
+        with zipfile.ZipFile(old_zip, "w") as z:
+            z.writestr("KnoxMap/knoxmap.py", "old release")
+        updater.STAGED.write_text(json.dumps({"version": "0.5", "zip": str(old_zip)}))
+        check(not updater.apply_staged() and (base / "knoxmap.py").read_text() == "new",
+              "an automatic update never goes back to an older version")
+        updater.STAGED.write_text(json.dumps({"version": "0.5", "zip": str(old_zip), "chosen": True}))
+        updater.enabled = lambda: False       # choosing an older one turns them off
+        check(updater.apply_staged() and (base / "knoxmap.py").read_text() == "old release",
+              "a version chosen in the menu goes in, older ones too")
         check(updater.is_newer("1.10", "1.9") and not updater.is_newer("1.2", "1.2.0")
               and updater.is_newer("1.2.1", "1.2"), "versions compare as numbers")
     finally:
