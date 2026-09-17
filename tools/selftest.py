@@ -573,6 +573,23 @@ def main(argv: list[str]) -> int:
               and all(-32768 <= px <= 32767 for feats in paper.values()
                       for _t, rings, _p in feats for ring in rings for px, _ in ring),
               f"the paper map is written as Build 42's worldmap.xml.bin ({len(paper)} cells)")
+        # Walk it the way the game does - one point buffer per cell, each
+        # outline remembering where it starts as a signed 16-bit number - and
+        # make sure nothing reads past the end. Reading past it is what broke
+        # the in-game map from worldmap.xml: hundreds of
+        # "IndexOutOfBoundsException at WorldMapRenderer.fillPolygon".
+        def buffer_safe(data) -> bool:
+            for feats in data.values():
+                pos = 0
+                for _kind, rings, _props in feats:
+                    for ring in rings:
+                        first = pos
+                        pos += 2 * len(ring)
+                        if first > 32767 or first + 2 * (len(ring) - 1) + 1 >= pos:
+                            return False
+            return True
+
+        check(buffer_safe(paper), "every outline on the paper map is inside its cell's buffer")
         # A cell packed with more outlines than the game can index (it holds
         # each cell's points in one buffer, addressed by a 16-bit number).
         from knoxbuild.worldmap_bin import CELL_POINT_BUDGET, write_bin
