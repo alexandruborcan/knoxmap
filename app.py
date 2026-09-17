@@ -196,6 +196,65 @@ def api_update_restart():
     return jsonify({"restarting": True})
 
 
+# ---- the window in another language ---------------------------------------------
+#
+# lang/english.txt lists every line the window says. Copy it to lang/<language>
+# .txt, translate the right of each "=", and the language appears in the menu at
+# the top - no code, no rebuild. tools/make_lang_template.py writes the English
+# one from the page itself.
+
+LANG_DIR = BASE_DIR / "lang"
+
+
+def _language_strings(path: Path) -> dict:
+    """The translated lines of one language file, English -> theirs."""
+    out = {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        english, _, theirs = line.partition("=")
+        english, theirs = english.strip(), theirs.strip()
+        # A line left as the English is simply not translated.
+        if english and theirs and english != theirs:
+            out[english] = theirs
+    return out
+
+
+@app.route("/api/languages")
+def api_languages():
+    files = sorted(LANG_DIR.glob("*.txt")) if LANG_DIR.is_dir() else []
+    import knoxpaths
+    return jsonify({
+        "languages": [{"file": f.stem, "name": f.stem[:1].upper() + f.stem[1:],
+                       "lines": len(_language_strings(f))} for f in files],
+        "current": knoxpaths.load_config().get("language", "english"),
+        "folder": str(LANG_DIR),
+    })
+
+
+@app.route("/api/language/<name>", methods=["GET", "POST"])
+def api_language(name: str):
+    """One language's lines, and - on POST - the one to open with next time."""
+    import knoxpaths
+
+    safe = SAFE_NAME.sub("_", name).strip("_").lower()
+    path = (LANG_DIR / f"{safe}.txt")
+    if safe != "english" and not path.is_file():
+        return failed(f"No lang/{safe}.txt. Copy lang/english.txt and translate it.", 404)
+    if request.method == "POST":
+        config = knoxpaths.load_config()
+        config["language"] = safe
+        with open(knoxpaths.CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+        log.info("language set to %s", safe)
+    return jsonify({"file": safe, "strings": _language_strings(path) if path.is_file() else {}})
+
+
 @app.route("/api/open-logs", methods=["POST"])
 def api_open_logs():
     return jsonify({"opened": knoxlog.open_folder(), "folder": str(knoxlog.LOG_DIR)})

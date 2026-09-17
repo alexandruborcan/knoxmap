@@ -619,6 +619,33 @@ def main(argv: list[str]) -> int:
               and 'data-in-window="0"' in page.get_data(as_text=True),
               "the page knows whether it is in the app window or a browser")
 
+        # The window in another language: lang/<language>.txt, translated by
+        # whoever wants it, with no code to change (tools/make_lang_template.py).
+        lang_dir = Path(work) / "lang"
+        lang_dir.mkdir(exist_ok=True)
+        (lang_dir / "english.txt").write_text(
+            "# template\nGenerate map = Generate map\n", encoding="utf-8")
+        (lang_dir / "testish.txt").write_text(
+            "# a translation\n"
+            "Generate map = Haritayi olustur\n"
+            "1. Area = 1. Bolge\n"
+            "Map name = Map name\n"            # left in English: not translated
+            "a line with no separator\n",
+            encoding="utf-8")
+        was_lang = knoxmap_app.LANG_DIR
+        knoxmap_app.LANG_DIR = lang_dir
+        try:
+            listed = client.get("/api/languages").get_json()
+            words = client.get("/api/language/testish").get_json()
+            missing = client.get("/api/language/klingon")
+        finally:
+            knoxmap_app.LANG_DIR = was_lang
+        names = [x["name"] for x in listed["languages"]]
+        check(names == ["English", "Testish"]
+              and words["strings"] == {"Generate map": "Haritayi olustur", "1. Area": "1. Bolge"}
+              and missing.status_code == 404,
+              "a language file in lang/ is offered and read")
+
         import zipfile as _zip
 
         revealed = []

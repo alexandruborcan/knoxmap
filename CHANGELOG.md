@@ -7,6 +7,13 @@
   is checked against GitHub's fingerprint and goes in when KnoxMap restarts -
   including an older one, for when a new release breaks something. On an older
   version automatic updates stay off until you choose the newest again.
+- **KnoxMap in your language**, from a text file. `lang/english.txt` lists
+  every line the window says; copy it, name it after the language -
+  `russian.txt`, `deutsch.txt` - translate the right of each `=`, and it
+  appears in the menu at the top of the window. No code, no rebuild, and
+  whatever is left in English stays English, so a half-finished file works.
+  `python tools/make_lang_template.py` writes the English file again after an
+  update.
 - The download buttons work in the app window (GitHub issue #2). The window
   is not a browser and had nowhere to put a file, so clicking them did
   nothing at all; there they now save the file - making the zip when that is

@@ -179,6 +179,13 @@ second without rebuilding, then compile again so the game sees the change.
 
 ## Good to know
 
+- **KnoxMap in your language.** `lang/english.txt` holds every line the window
+  says, as `English = English`. Copy it, name the copy after the language
+  (`russian.txt`, `deutsch.txt`, `turkce.txt`), translate the right-hand side
+  of each line, and pick it from the menu at the top of the window. Lines left
+  in English stay English, so you can translate as much or as little as you
+  like, and `python tools/make_lang_template.py` writes the English file again
+  after an update. Translations are welcome as pull requests.
 - **Fresh loot without a new save.** The game fills a container once and
   remembers it, so a map installed again keeps what it rolled the first time.
   In game, right-click the ground and pick **Reset loot** - this building, or
