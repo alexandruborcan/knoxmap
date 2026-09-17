@@ -158,6 +158,15 @@ def _warn_if_not_build42(game: Path) -> None:
     say("")
 
 
+def _ask(prompt: str) -> str:
+    """input(), or nothing when there is no one to answer (no console)."""
+    try:
+        return input(prompt)
+    except (EOFError, OSError):
+        say("")
+        return ""
+
+
 def choose_steam_folders() -> None:
     """Show the Steam libraries found on their own, and let the player add a
     drive or folder they were not found on (games and Workshop mods on
@@ -167,7 +176,7 @@ def choose_steam_folders() -> None:
     if os.environ.get("KNOXMAP_UNATTENDED") == "1":
         return
     while True:
-        answer = input("      Games or Workshop mods on another drive? Type the drive or folder\n"
+        answer = _ask("      Games or Workshop mods on another drive? Type the drive or folder\n"
                        "      (like E: or E:\\Games\\Steam, several separated by ;),\n"
                        "      or press Enter to go on: ").strip()
         if not answer:
@@ -177,7 +186,8 @@ def choose_steam_folders() -> None:
         if bad:
             say(f"      No Steam library in {', '.join(bad)} - try again.")
             continue
-        knoxpaths.save_steam_folders(knoxpaths.chosen_steam_folders() + folders)
+        saved = knoxpaths.load_config().get("steam_folders") or []
+        knoxpaths.save_steam_folders(list(saved) + folders)
         say("      Steam libraries: " + ", ".join(f["path"] for f in knoxpaths.steam_libraries_found()))
         return
 
@@ -196,7 +206,7 @@ def find_game() -> Path | None:
         saved = knoxpaths.load_config().get("pz_install")
         return Path(saved) if saved else None
     while True:
-        answer = input("      Paste the ProjectZomboid folder path (or press Enter to skip): ").strip().strip('"')
+        answer = _ask("      Paste the ProjectZomboid folder path (or press Enter to skip): ").strip().strip('"')
         if not answer:
             return None
         if (Path(answer) / "media" / "texturepacks").exists():

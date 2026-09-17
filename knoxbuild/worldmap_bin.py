@@ -87,6 +87,59 @@ def _pieces(rings, cell_x, cell_y):
     return out
 
 
+# The game keeps all of a cell's points in one buffer and remembers where each
+# outline starts in it as a 16-bit number: past 32767 values - 16383 points -
+# the start wraps negative and every outline after it fails to load. Knox
+# County's densest cell has about 1600. A packed city centre can have more.
+CELL_POINT_BUDGET = 15000
+# What goes first when a cell is over it: the small things.
+KEEP_ORDER = ("water", "highway", "railway", "building", "natural")
+
+
+def _points(piece) -> int:
+    return sum(len(ring) for ring in piece)
+
+
+def _within_budget(features: list) -> list:
+    """A cell's features, simplified and then thinned until they fit."""
+    if sum(_points(p) for p, _ in features) <= CELL_POINT_BUDGET:
+        return features
+    for tolerance in (0.75, 1.5, 3.0):
+        simpler = []
+        for piece, props in features:
+            try:
+                shape = Polygon(piece[0], piece[1:]).simplify(tolerance, preserve_topology=True)
+            except Exception:  # noqa: BLE001
+                simpler.append((piece, props))
+                continue
+            if shape.is_empty or shape.geom_type != "Polygon" or len(shape.exterior.coords) < 4:
+                continue
+            rings = [[(round(x), round(y)) for x, y in list(r.coords)[:-1]]
+                     for r in [shape.exterior, *shape.interiors]]
+            rings = [r for r in rings if len(r) >= 3]
+            if rings:
+                simpler.append((rings, props))
+        features = simpler
+        if sum(_points(p) for p, _ in features) <= CELL_POINT_BUDGET:
+            return features
+
+    def rank(item):
+        piece, props = item
+        keys = [k for k, _ in props]
+        kind = min((KEEP_ORDER.index(k) for k in keys if k in KEEP_ORDER), default=len(KEEP_ORDER))
+        xs = [x for x, _ in piece[0]]
+        ys = [y for _, y in piece[0]]
+        return (kind, -(max(xs) - min(xs)) * (max(ys) - min(ys)))
+
+    kept, total = [], 0
+    for item in sorted(features, key=rank):
+        n = _points(item[0])
+        if total + n <= CELL_POINT_BUDGET:
+            kept.append(item)
+            total += n
+    return kept
+
+
 def write_bin(xml_path: str, bin_path: str) -> int:
     """Convert worldmap.xml to worldmap.xml.bin. Returns features written."""
     cells: dict[tuple[int, int], list] = {}
@@ -105,6 +158,9 @@ def write_bin(xml_path: str, bin_path: str) -> int:
             for cx in range(max(0, cx0), cx1 + 1):
                 for piece in _pieces(rings, cx, cy):
                     cells.setdefault((cx, cy), []).append((piece, props))
+
+    for key in list(cells):
+        cells[key] = _within_budget(cells[key])
 
     strings: dict[str, int] = {}
 

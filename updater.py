@@ -115,6 +115,15 @@ def check(force: bool = False) -> dict:
     """Look for a newer release and stage it. Safe to call from any thread."""
     import requests
 
+    with _lock:
+        if _state["state"] in ("checking", "downloading"):
+            return dict(_state)
+    staged = _read_staged()
+    if staged and staged.get("chosen") and Path(staged.get("zip", "")).exists():
+        # A version chosen in the window waits for its restart, whether or
+        # not automatic updates are on.
+        _set(state="ready", latest=staged["version"], notes=staged.get("notes", ""))
+        return status()
     if not enabled():
         _set(state="disabled")
         return status()
@@ -124,10 +133,6 @@ def check(force: bool = False) -> dict:
         _state.update(state="checking", error=None)
     current = current_version()
     try:
-        staged = _read_staged()
-        if staged and staged.get("chosen") and Path(staged["zip"]).exists():
-            _set(state="ready", latest=staged["version"], notes=staged.get("notes", ""))
-            return status()       # a version chosen in the window waits for its restart
         if staged and is_newer(staged["version"], current) and Path(staged["zip"]).exists():
             _set(state="ready", latest=staged["version"], notes=staged.get("notes", ""))
             return status()
@@ -249,14 +254,15 @@ def choose(version: str) -> dict:
         found = [rel for rel in available if _parse(rel.get("tag_name", "")) == _parse(version)]
         if not found:
             raise RuntimeError(f"there is no release {version}")
+        _stage(found[0], chosen=True)
         # An older version stays put: no automatic update straight back to the
-        # newest. Choosing the newest lets them run again.
+        # newest. Choosing the newest lets them run again. Only once it has
+        # downloaded, so a failed download changes nothing.
         import knoxpaths
         config = knoxpaths.load_config()
         config["auto_update"] = found[0] is available[0]
         with open(knoxpaths.CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
-        _stage(found[0], chosen=True)
     except Exception as exc:  # noqa: BLE001
         _log().warning("choosing KnoxMap %s failed: %s", version, exc)
         _set(state="error", error=str(exc))

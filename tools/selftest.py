@@ -573,6 +573,27 @@ def main(argv: list[str]) -> int:
               and all(-32768 <= px <= 32767 for feats in paper.values()
                       for _t, rings, _p in feats for ring in rings for px, _ in ring),
               f"the paper map is written as Build 42's worldmap.xml.bin ({len(paper)} cells)")
+        # A cell packed with more outlines than the game can index (it holds
+        # each cell's points in one buffer, addressed by a 16-bit number).
+        from knoxbuild.worldmap_bin import CELL_POINT_BUDGET, write_bin
+        crowded = os.path.join(work, "crowded.xml")
+        with open(crowded, "w", encoding="utf-8") as f:
+            f.write('<?xml version="1.0" encoding="UTF-8"?>\n<world version="1.0">\n'
+                    ' <cell x="0" y="0">\n')
+            for i in range(3000):
+                ring = "".join(f'<point x="{(i * 7) % 200 + dx}" y="{(i * 13) % 200 + dy}"/>'
+                               for dx, dy in ((0, 0), (9, 1), (10, 9), (1, 10), (0, 5), (5, 0)))
+                f.write('  <feature>\n   <geometry type="Polygon">\n'
+                        f'    <coordinates>{ring}</coordinates>\n   </geometry>\n'
+                        '   <properties><property name="building" value="yes"/></properties>\n'
+                        '  </feature>\n')
+            f.write(" </cell>\n</world>\n")
+        write_bin(crowded, crowded + ".bin")
+        packed = read_bin(crowded + ".bin")
+        worst = max((sum(len(r) for _t, rings, _p in feats for r in rings)
+                     for feats in packed.values()), default=0)
+        check(packed and worst <= CELL_POINT_BUDGET,
+              f"a cell too full for the game's map is thinned to fit ({worst} points)")
         objects = os.path.join(mod_root, "common", "media", "maps", "Selftest Town", "objects.lua")
         text = open(objects, encoding="utf-8").read() if os.path.exists(objects) else ""
         check(text.startswith("objects = {") and text.count('type = "ParkingStall"') == stalls

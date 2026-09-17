@@ -87,6 +87,7 @@ def save_steam_folders(folders: list[str]) -> None:
     config["steam_folders"] = [str(f).strip().strip('"') for f in folders if str(f).strip()]
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
+    _LIBRARY_CACHE["libraries"] = None
 
 
 def library_of(folder: str | Path) -> list[Path]:
@@ -117,9 +118,27 @@ def steam_libraries_found() -> list[dict]:
     return [{"path": str(lib), "chosen": str(lib).lower() in chosen} for lib in _steam_libraries()]
 
 
+_LIBRARY_CACHE: dict = {"at": 0.0, "libraries": None}
+
+
 def _steam_libraries() -> list[Path]:
     """Every Steam library folder on this PC: the ones the player chose, then
-    the ones Steam itself lists, then the usual folders on every drive."""
+    the ones Steam itself lists, then the usual folders on every drive.
+
+    Remembered for a minute: the page asks several times on every load, and a
+    mapped network drive that is not connected can take seconds to answer."""
+    import time
+
+    chosen = tuple(chosen_steam_folders())
+    if (_LIBRARY_CACHE["libraries"] is not None and _LIBRARY_CACHE.get("chosen") == chosen
+            and time.time() - _LIBRARY_CACHE["at"] < 60):
+        return list(_LIBRARY_CACHE["libraries"])
+    found = _find_steam_libraries()
+    _LIBRARY_CACHE.update(at=time.time(), libraries=found, chosen=chosen)
+    return list(found)
+
+
+def _find_steam_libraries() -> list[Path]:
     libraries: list[Path] = [lib for folder in chosen_steam_folders() for lib in library_of(folder)]
     roots: list[Path] = []
     try:
