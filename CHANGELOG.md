@@ -7,6 +7,11 @@
   is checked against GitHub's fingerprint and goes in when KnoxMap restarts -
   including an older one, for when a new release breaks something. On an older
   version automatic updates stay off until you choose the newest again.
+- The download buttons work in the app window (GitHub issue #2). The window
+  is not a browser and had nowhere to put a file, so clicking them did
+  nothing at all; there they now save the file - making the zip when that is
+  what was asked for - and show it in Explorer. In a browser they download as
+  before.
 - Big maps no longer die with "MemoryError" halfway through drawing. Setup
   now insists on a 64-bit Python - a 32-bit one can only use about 2 GB
   however much the PC has - and makes an environment built by a 32-bit Python

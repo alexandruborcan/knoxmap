@@ -346,3 +346,5 @@ summary .count { color: var(--muted); font-size: 12px; font-weight: 400; }
 .upgrade-note button.later { color: var(--text); background: transparent;
   border: 1px solid var(--line-strong); }
 .upgrade-note button:disabled { opacity: .6; cursor: default; }
+
+.hint.bad { color: var(--bad); }

@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="/static/vendor/leaflet-draw/leaflet.draw.css"/>
 <link rel="stylesheet" href="/static/css/app.css"/>
 </head>
-<body>
+<body data-in-window="{{ 1 if in_window else 0 }}">
 
 <header class="topbar">
   <img src="/static/logo.svg" alt="" class="logo"/>
@@ -176,6 +176,7 @@
     <div class="results-side">
       <div id="results-info"></div>
       <a id="downloadAll" class="btn" download>Download everything (.zip)</a>
+      <div id="saveNote" class="hint"></div>
       <details id="downloads-details">
         <summary>Single files</summary>
         <ul id="downloads"></ul>

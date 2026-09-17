@@ -700,6 +700,35 @@ function stopProgress() {
   progressTimer = null;
 }
 
+// In the app window a download link does nothing: it is a WebView, with
+// nowhere to put a file. Everything is on disk already, so there the links
+// ask the server to save the file and show it in Explorer instead.
+const IN_WINDOW = document.body.dataset.inWindow === '1';
+
+async function saveFile(name, label) {
+  const note = document.getElementById('saveNote');
+  if (note) { note.className = 'hint'; note.textContent = `Saving ${label}…`; }
+  try {
+    const res = await fetch('/api/save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mapName: currentMap, name }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw apiError(data, res);
+    if (note) note.textContent = `Saved ${data.name} in ${data.folder} (shown in Explorer).`;
+  } catch (err) {
+    if (note) { note.className = 'hint bad'; note.textContent = err.message; }
+    fx.toast('bad', 'Could not save that file', err.message, 8000);
+  }
+}
+
+function wireDownload(link, name, label) {
+  if (!IN_WINDOW) return;
+  link.removeAttribute('download');
+  link.href = '#';
+  link.addEventListener('click', e => { e.preventDefault(); saveFile(name, label); });
+}
+
 function renderResults(data) {
   const section = document.getElementById('results');
   section.hidden = false;
@@ -720,6 +749,10 @@ function renderResults(data) {
   const all = document.getElementById('downloadAll');
   all.href = data.files.zip;
   all.setAttribute('download', `${data.mapName}.zip`);
+  all.textContent = IN_WINDOW ? 'Save everything as a .zip' : 'Download everything (.zip)';
+  wireDownload(all, 'zip', 'the zip');
+  const note = document.getElementById('saveNote');
+  if (note) { note.className = 'hint'; note.textContent = ''; }
 
   document.querySelectorAll('#results .ph').forEach(el => {
     el.textContent = data.mapName;
@@ -738,6 +771,10 @@ function renderResults(data) {
   ul.innerHTML = entries.map(([label, href]) =>
     `<li>→ <a href="${href}" target="_blank" download>${label}</a></li>`
   ).join('');
+  ul.querySelectorAll('a').forEach((link, i) => {
+    const href = entries[i][1];
+    wireDownload(link, href.split('/').pop(), entries[i][0]);
+  });
   setupPipeline(data);
   section.scrollIntoView({ behavior: 'smooth' });
 }

@@ -602,6 +602,44 @@ def main(argv: list[str]) -> int:
         import knoxlog as _kl
         check(f"v{_kl.version()}" in page.get_data(as_text=True) and _kl.version() != "unknown",
               f"the window shows the version ({_kl.version()})")
+
+        # In the app window a download link does nothing - there is no browser
+        # to put a file anywhere - so the page is told, and saves through the
+        # server instead. See /api/save.
+        was_window = os.environ.get("KNOXMAP_WINDOW")
+        os.environ["KNOXMAP_WINDOW"] = "1"
+        try:
+            in_window = client.get("/").get_data(as_text=True)
+        finally:
+            if was_window is None:
+                os.environ.pop("KNOXMAP_WINDOW")
+            else:
+                os.environ["KNOXMAP_WINDOW"] = was_window
+        check('data-in-window="1"' in in_window
+              and 'data-in-window="0"' in page.get_data(as_text=True),
+              "the page knows whether it is in the app window or a browser")
+
+        import zipfile as _zip
+
+        revealed = []
+        was_open = _kl.open_folder
+        was_output = knoxmap_app.OUTPUT_DIR
+        _kl.open_folder = lambda p=None: revealed.append(str(p)) or True
+        knoxmap_app.OUTPUT_DIR = Path(out).parent      # where this map really is
+        try:
+            saved = client.post("/api/save", json={"mapName": "selftest", "name": "zip"}).get_json()
+            one = client.post("/api/save", json={"mapName": "selftest",
+                                                 "name": "selftest_preview.png"}).get_json()
+            escape = client.post("/api/save", json={"mapName": "selftest",
+                                                    "name": "../../secrets.txt"})
+        finally:
+            _kl.open_folder = was_open
+            knoxmap_app.OUTPUT_DIR = was_output
+        zip_path = Path(out) / "selftest.zip"
+        check(saved and zip_path.exists() and _zip.ZipFile(zip_path).namelist()
+              and one and one.get("name") == "selftest_preview.png"
+              and escape.status_code == 400 and len(revealed) == 2,
+              "saving a map's files writes them and shows them in Explorer")
         check(not re.search(r'(?:src="|<link[^>]*href=")https?://', page.get_data(as_text=True)),
               "page loads nothing from other sites")
 

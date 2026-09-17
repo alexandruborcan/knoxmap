@@ -252,7 +252,11 @@ def api_progress():
 
 @app.route("/")
 def index():
-    return render_template("index.html", version=knoxlog.version())
+    # The app window cannot download a file the way a browser does - clicking
+    # a download link there did nothing at all - so the page asks the server
+    # to save it and show it in Explorer instead. See /api/save.
+    return render_template("index.html", version=knoxlog.version(),
+                           in_window=os.environ.get("KNOXMAP_WINDOW") == "1")
 
 
 # ---- map tiles, fetched the way the OSM tile policy asks -------------------------
@@ -1187,6 +1191,40 @@ Notes
     # Japanese Windows cannot write in its own, and the whole generate request
     # failed on them after the map was already drawn.
     (map_dir / "README.txt").write_text(text, encoding="utf-8")
+
+
+@app.route("/api/save", methods=["POST"])
+def api_save():
+    """Save a map's file where the player can find it and show it in Explorer.
+
+    A download link does nothing in the app window: it is a WebView, not a
+    browser, with nowhere to put a file. Everything is already on disk in the
+    map's own folder, so "downloading" here means making the zip when that is
+    what was asked for, and opening Explorer with the file selected.
+    """
+    data = _json_body()
+    map_dir = _map_dir(data.get("mapName", ""))
+    if map_dir is None:
+        return failed("Unknown map.", 404)
+    name = str(data.get("name", "")).strip()
+    if name in ("", "zip"):
+        target = map_dir / f"{map_dir.name}.zip"
+        try:
+            with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
+                for path in sorted(map_dir.rglob("*")):
+                    if not path.is_file() or path.suffix.lower() == ".zip":
+                        continue
+                    zf.write(path, arcname=str(Path(map_dir.name) / path.relative_to(map_dir)))
+        except OSError as exc:
+            return failed(f"Could not write the zip: {exc}", 500, exc)
+    else:
+        target = (map_dir / name).resolve()
+        if not str(target).startswith(str(map_dir.resolve())) or not target.is_file():
+            return failed("That file is not in this map's folder.", 400)
+    knoxlog.open_folder(target)
+    log.info("saved %s for %s", target.name, map_dir.name)
+    return jsonify({"path": str(target), "name": target.name,
+                    "folder": str(target.parent)})
 
 
 @app.route("/download/<map_name>.zip")

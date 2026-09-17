@@ -312,11 +312,22 @@ def _tail(path: Path, limit: int = 3 * 1024 * 1024) -> str:
         return f"(could not read: {exc})"
 
 
-def open_folder() -> bool:
-    """Show the logs folder in Explorer."""
+def open_folder(path=None) -> bool:
+    """Show a file or folder in Explorer; the logs folder by default."""
+    import subprocess
+
     try:
-        LOG_DIR.mkdir(exist_ok=True)
-        os.startfile(str(LOG_DIR))  # type: ignore[attr-defined]
+        if path is None:
+            LOG_DIR.mkdir(exist_ok=True)
+            os.startfile(str(LOG_DIR))  # type: ignore[attr-defined]
+            return True
+        path = Path(path)
+        if path.is_dir():
+            os.startfile(str(path))     # type: ignore[attr-defined]
+        else:
+            # Explorer wants the comma joined to the switch, and the path as
+            # its own argument, or it opens Documents instead.
+            subprocess.Popen(["explorer", "/select,", str(path)])
         return True
     except (OSError, AttributeError):
         return False
