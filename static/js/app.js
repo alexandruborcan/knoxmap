@@ -459,6 +459,149 @@ loadSettings().catch(() => {
     'Could not load the settings list.';
 });
 
+// ---- maps already made -----------------------------------------------------------
+//
+// A map does not have to be drawn again when KnoxMap is updated: each step
+// records the version that ran it (knoxbuild/mapstate.py), so opening one an
+// older release made says which steps are out of date - usually Install alone -
+// and offers to run just those.
+
+async function loadMaps() {
+  let data;
+  try {
+    data = await (await fetch('/api/maps')).json();
+  } catch (_) { return; }
+  const list = document.getElementById('mapList');
+  const card = document.getElementById('mapsCard');
+  if (!data.maps || !data.maps.length) { card.hidden = true; return; }
+  card.hidden = false;
+  document.getElementById('mapsCount').textContent = `(${data.maps.length})`;
+  list.innerHTML = '';
+  for (const m of data.maps) {
+    const li = document.createElement('li');
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = m.mapName;
+    const size = document.createElement('span');
+    size.className = 'size';
+    size.textContent = `${m.cellsX}×${m.cellsY} cells`;
+    li.append(name, size);
+    if (m.needs.length) {
+      const tag = document.createElement('span');
+      tag.className = 'old';
+      tag.textContent = m.madeWith === 'an early release' ? 'older release'
+        : `made with ${m.madeWith}`;
+      li.append(tag);
+    }
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.textContent = 'Open';
+    open.addEventListener('click', () => openMap(m.mapName));
+    li.append(open);
+    list.append(li);
+  }
+}
+
+async function openMap(mapName) {
+  let data;
+  try {
+    const res = await fetch(`/api/maps/${encodeURIComponent(mapName)}`);
+    data = await res.json();
+    if (!res.ok) throw apiError(data, res);
+  } catch (err) {
+    fx.toast('bad', 'Could not open that map', err.message, 8000);
+    return;
+  }
+  renderResults(data);
+  showUpgrade(data);
+}
+
+function showUpgrade(data) {
+  const box = document.getElementById('upgradeNote');
+  if (!box) return;
+  if (!data.needs || !data.needs.length) { box.hidden = true; box.innerHTML = ''; return; }
+  const steps = data.needsLabels.join(' → ');
+  box.hidden = false;
+  box.innerHTML = '<span></span>';
+  // A map this KnoxMap made itself is not "from an earlier release": it is
+  // simply a step short, usually the install it has never had.
+  box.querySelector('span').textContent = data.madeWith === data.current
+    ? `This map still needs: ${steps}.`
+    : `This map was made with ${data.madeWith === 'an early release'
+        ? 'an earlier release' : 'KnoxMap ' + data.madeWith}. `
+      + `Do you want to upgrade it to ${data.current}? It needs: ${steps}.`;
+  const go = document.createElement('button');
+  go.type = 'button';
+  go.textContent = 'Upgrade';
+  go.addEventListener('click', () => upgradeMap(data, go));
+  const later = document.createElement('button');
+  later.type = 'button';
+  later.className = 'later';
+  later.textContent = 'Not now';
+  later.addEventListener('click', () => { box.hidden = true; });
+  box.append(go, later);
+}
+
+async function upgradeMap(data, button) {
+  const box = document.getElementById('upgradeNote');
+  const say = text => { box.querySelector('span').textContent = text; };
+  for (const b of box.querySelectorAll('button')) b.disabled = true;
+  const post = async (url, body) => {
+    const res = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const out = await res.json();
+    if (!res.ok) throw apiError(out, res);
+    return out;
+  };
+  try {
+    for (const step of data.needs) {
+      if (step === 'generate') {
+        say(`Drawing ${data.mapName} again…`);
+        const b = data.bbox || {};
+        await post('/api/generate', {
+          south: b.south, west: b.west, north: b.north, east: b.east,
+          metersPerTile: data.metersPerTile, mapName: data.mapName,
+          settings: data.settings, shape: data.shape,
+        });
+      } else if (step === 'build') {
+        say('Building the buildings again…');
+        await post('/api/buildings', { mapName: data.mapName, settings: data.settings });
+      } else if (step === 'compile') {
+        say('Compiling…');
+        await post('/api/compile', { mapName: data.mapName });
+        for (;;) {
+          await new Promise(r => setTimeout(r, 5000));
+          const st = await (await fetch(
+            `/api/compile-status?map=${encodeURIComponent(data.mapName)}`)).json();
+          if (st.state === 'running') {
+            say(`Compiling… ${st.cells || 0} of ${st.expected || '?'} cells`);
+            continue;
+          }
+          if (st.error) throw new Error(st.error);
+          break;
+        }
+      } else if (step === 'install') {
+        say('Installing…');
+        await post('/api/install', { mapName: data.mapName, title: data.mapName,
+                                     modId: data.mapName });
+      }
+    }
+    box.innerHTML = '<span></span>';
+    box.querySelector('span').textContent =
+      `${data.mapName} is up to date with KnoxMap ${data.current}.`;
+    fx.toast('ok', 'Map upgraded', `${data.needsLabels.join(', ')} ran again.`);
+    loadMaps();
+  } catch (err) {
+    say(`Could not upgrade it: ${err.message}`);
+    for (const b of box.querySelectorAll('button')) b.disabled = false;
+    if (button) button.textContent = 'Try again';
+  }
+}
+
+loadMaps();
+
 // ---- generation ----
 
 document.getElementById('generateBtn').addEventListener('click', async () => {
@@ -510,6 +653,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
     fx.toast('ok', 'Terrain generated',
              `${data.cellsX} × ${data.cellsY} cells from ${data.featureCount.toLocaleString()} features.`);
     renderResults(data);
+    loadMaps();
   } catch (err) {
     status.className = 'error';
     status.textContent = `Error: ${err.message}`;
@@ -831,6 +975,8 @@ function note(id, text, cls) {
 
 function setupPipeline(data) {
   currentMap = data.mapName;
+  const upgrade = document.getElementById('upgradeNote');
+  if (upgrade) { upgrade.hidden = true; upgrade.innerHTML = ''; }
   document.getElementById('mapTitle').value = data.mapName;
   document.getElementById('modId').value = data.mapName;
   document.getElementById('buildingsBtn').disabled = false;

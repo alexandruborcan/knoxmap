@@ -77,6 +77,15 @@
       <ul class="setup-list" id="setupList"></ul>
     </section>
 
+    <section class="panel" id="mapsCard" hidden>
+      <details id="mapsPanel">
+        <summary>Your maps <span class="count" id="mapsCount"></span></summary>
+        <p class="hint">Maps already in this folder. Open one to build, compile or install
+          it again without drawing it afresh.</p>
+        <ul class="map-list" id="mapList"></ul>
+      </details>
+    </section>
+
     <section class="panel" data-card="area">
       <h2>1. Area</h2>
       <div class="coords">
@@ -156,6 +165,8 @@
 
 <section id="results" hidden>
   <h2>Map: <span class="ph map-badge">—</span></h2>
+
+  <div id="upgradeNote" class="upgrade-note" hidden></div>
 
   <div id="results-grid">
     <figure class="preview-frame">

@@ -757,6 +757,7 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
             "cells_y": cells_y,
             "spawn_density_max": spawn_density,
             "building_count": len(building_feats),
+            "feature_count": sum(len(v) for v in buckets.values()),
             "guide_reference": "Thuztor Mapping Guide v0.2",
         }, f, indent=2)
 

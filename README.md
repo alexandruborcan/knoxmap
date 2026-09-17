@@ -179,6 +179,12 @@ second without rebuilding, then compile again so the game sees the change.
 
 ## Good to know
 
+- **An update does not mean starting over.** Each step of a map records the
+  KnoxMap that ran it. Open a map again under *Your maps* and, if a newer
+  release changed anything it uses, the window offers to upgrade it and runs
+  only the steps that changed - often just **Install**, which is all the cars
+  and the in-game map need.
+
 - **Size and time.** A few square kilometres is a comfortable town. Compiling is
   the slow part: a 600 × 600 m city block takes a minute or two, and several
   minutes with 30-storey towers.

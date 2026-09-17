@@ -25,6 +25,7 @@ from flask import (Flask, jsonify, render_template, request, send_file,
 
 import knoxlog
 from generator import osm, places, renderer
+from knoxbuild import mapstate
 from knoxbuild.settings import PRESETS, Settings
 
 # Builds print place names in any script; a console on a legacy code page
@@ -588,6 +589,7 @@ def generate():
 
     _write_readme(map_dir, map_name, result)
     _set_progress(map_name, stage="done")
+    mapstate.stamp(str(map_dir), "generate")
     log.info("generate %s: done, %d features, %dx%d tiles, rotation %.1f, %.1fs "
              "(download %.1fs)", map_name, len(features), result.width, result.height,
              rotation, time.time() - t0, osm_time)
@@ -612,6 +614,73 @@ def generate():
             "readme": f"/output/{map_name}/README.txt",
         },
     })
+
+
+def _map_summary(map_dir: Path) -> dict:
+    """What the window shows for a map it did not just make."""
+    info = {}
+    try:
+        with open(map_dir / f"{map_dir.name}_info.json", encoding="utf-8") as f:
+            info = json.load(f)
+    except (OSError, ValueError):
+        pass
+    needs = mapstate.needs(str(map_dir))
+    stages = mapstate.done(str(map_dir))
+    return {
+        "mapName": map_dir.name,
+        "width": info.get("width_tiles", 0),
+        "height": info.get("height_tiles", 0),
+        "cellsX": info.get("cells_x", 0),
+        "cellsY": info.get("cells_y", 0),
+        "featureCount": info.get("feature_count") or info.get("building_count", 0),
+        "rotation": round(info.get("rotation", 0.0), 1),
+        "updated": int(map_dir.stat().st_mtime),
+        # What it was made from, so the window can run the steps again
+        # over the same area without asking for it to be drawn afresh.
+        "bbox": info.get("bbox"),
+        "metersPerTile": info.get("meters_per_tile", 1.0),
+        "shape": info.get("shape"),
+        "madeWith": mapstate.made_with(str(map_dir)),
+        "current": knoxlog.version(),
+        "stages": {k: v.get("version") for k, v in stages.items()},
+        "needs": needs,
+        "needsLabels": [mapstate.LABELS[s] for s in needs],
+        "files": {
+            "landscape": f"/output/{map_dir.name}/{map_dir.name}.bmp",
+            "vegetation": f"/output/{map_dir.name}/{map_dir.name}_veg.bmp",
+            "spawn": f"/output/{map_dir.name}/{map_dir.name}_ZombieSpawnMap.bmp",
+            "preview": f"/output/{map_dir.name}/{map_dir.name}_preview.png",
+            "buildings": f"/output/{map_dir.name}/{map_dir.name}_buildings.geojson",
+            "meta": f"/output/{map_dir.name}/{map_dir.name}_info.json",
+            "zip": f"/download/{map_dir.name}.zip",
+            "readme": f"/output/{map_dir.name}/README.txt",
+        },
+    }
+
+
+@app.route("/api/maps")
+def api_maps():
+    """Every map in output/, newest first, and whether an older KnoxMap made
+    it - so one can be opened again instead of drawn from scratch."""
+    maps = []
+    for entry in OUTPUT_DIR.iterdir():
+        if not entry.is_dir() or not (entry / f"{entry.name}_info.json").exists():
+            continue
+        maps.append(_map_summary(entry))
+    maps.sort(key=lambda m: -m["updated"])
+    return jsonify({"maps": maps, "current": knoxlog.version()})
+
+
+@app.route("/api/maps/<map_name>")
+def api_map(map_name: str):
+    """One map, in the shape the page shows a freshly generated one in."""
+    map_dir = _map_dir(map_name)
+    if map_dir is None:
+        return jsonify({"error": "Unknown map."}), 404
+    summary = _map_summary(map_dir)
+    summary["settings"] = _load_settings(map_dir).to_dict()
+    summary["population"] = _population(map_dir)
+    return jsonify(summary)
 
 
 @app.route("/output/<path:relpath>")
@@ -663,6 +732,7 @@ def api_buildings():
                  out.getvalue()[-4000:])
         return failed(f"Building generation failed: {exc}", 500, exc)
     tbx = sorted((map_dir / "buildings").glob("*.tbx"))
+    mapstate.stamp(str(map_dir), "build")
     log.info("buildings %s: %d files in %.1fs\n%s", map_dir.name, len(tbx),
              time.time() - t0, out.getvalue()[-3000:])
     return jsonify({"count": len(tbx),
@@ -957,6 +1027,7 @@ def api_compile():
                 return
             log.info("compile %s: %d cells in %.0fs", name, produced, time.time() - t0)
             with _PROGRESS_LOCK:
+                mapstate.stamp(str(map_dir), "compile")
                 _COMPILE[name] = {"state": "done", "error": None}
         except subprocess.TimeoutExpired as exc:
             eid = knoxlog.record(exc, f"compile {name}: timed out")
@@ -1006,6 +1077,7 @@ def api_install():
         return failed(str(exc), 400, exc)
     except Exception as exc:
         return failed(f"Install failed: {exc}", 500, exc)
+    mapstate.stamp(str(map_dir), "install")
     log.info("install %s: %d cells as %s, extras %s", map_dir.name, n_cells, mod_id, extras)
     return jsonify({"modRoot": str(mod_root), "cells": n_cells,
                     "extras": extras, "modId": mod_id, "title": title})

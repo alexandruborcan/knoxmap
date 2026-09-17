@@ -7,6 +7,12 @@
   is checked against GitHub's fingerprint and goes in when KnoxMap restarts -
   including an older one, for when a new release breaks something. On an older
   version automatic updates stay off until you choose the newest again.
+- **Your maps**, listed in the window: open one made earlier and build,
+  compile or install it again without drawing it from scratch. A map an older
+  release made says so - "This map was made with an earlier release. Do you
+  want to upgrade?" - and **Upgrade** runs only the steps that release
+  changed, usually just Install. Every step now records the version that ran
+  it, so this gets more exact from here on.
 - The in-game map holds up in a packed city centre: a map cell with more
   outlines than the game can index is simplified, and thinned if it has to
   be, instead of the map screen throwing them away as it drew them.

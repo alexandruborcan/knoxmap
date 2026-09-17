@@ -322,3 +322,27 @@ button.version:hover, button.version[aria-expanded="true"] { color: var(--accent
 .version-list details { margin-top: 3px; font-size: 12px; color: var(--muted); }
 .version-list details summary { cursor: pointer; }
 .version-list details pre { white-space: pre-wrap; font: inherit; margin: 4px 0 0; }
+
+/* ---- your maps, and maps an older KnoxMap made ------------------------------- */
+.map-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.map-list > li { display: flex; align-items: center; gap: 8px; padding: 5px 0;
+  border-top: 1px solid var(--line); font-size: 13px; }
+.map-list .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-list .size { color: var(--muted); font-size: 12px; }
+.map-list .old { font-size: 11px; color: var(--warn, #e0b341); border: 1px solid currentColor;
+  border-radius: 3px; padding: 0 5px; white-space: nowrap; }
+.map-list button { margin-left: auto; font: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer; color: var(--accent-ink); background: var(--accent); border: 0;
+  border-radius: 4px; padding: 3px 10px; }
+.map-list button:disabled { opacity: .5; cursor: default; }
+summary .count { color: var(--muted); font-size: 12px; font-weight: 400; }
+.upgrade-note { margin: 0 0 10px; padding: 10px 12px; border: 1px solid #5a4a2c;
+  background: var(--warn-soft); border-radius: 6px; font-size: 13px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.upgrade-note[hidden] { display: none; }
+.upgrade-note button { font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  color: var(--accent-ink); background: var(--accent); border: 0; border-radius: 4px;
+  padding: 4px 10px; }
+.upgrade-note button.later { color: var(--text); background: transparent;
+  border: 1px solid var(--line-strong); }
+.upgrade-note button:disabled { opacity: .6; cursor: default; }

@@ -191,6 +191,43 @@ def check_repair(check, out: str) -> None:
           "a sound project is left exactly as it is")
 
 
+def check_mapstate(check, out: str) -> None:
+    """What a newer KnoxMap needs redone on an older map, and what it leaves
+    alone (knoxbuild/mapstate.py)."""
+    import knoxlog
+    from knoxbuild import mapstate
+
+    # The map the selftest just made: built, compiled and installed by this
+    # version, so there is nothing to redo.
+    for stage in mapstate.STAGES:
+        mapstate.stamp(out, stage)
+    check(mapstate.needs(out) == [] and mapstate.made_with(out) == knoxlog.version(),
+          "a map this KnoxMap made needs nothing redone")
+
+    # One made before the cars and the pumps: build again, and everything
+    # after it - but not the terrain, which has not changed since.
+    state = {"stages": {"generate": {"version": "1.3.2"}, "build": {"version": "1.3.2"},
+                        "compile": {"version": "1.3.2"}, "install": {"version": "1.3.2"}}}
+    with open(os.path.join(out, mapstate.STATE_FILE), "w", encoding="utf-8") as f:
+        json.dump(state, f)
+    check(mapstate.needs(out) == ["build", "compile", "install"]
+          and mapstate.made_with(out) == "1.3.2",
+          "a map from before the cars is built, compiled and installed again")
+
+    # One from just before the in-game map fix: install alone.
+    state["stages"] = {k: {"version": "1.3.3"} for k in mapstate.STAGES}
+    with open(os.path.join(out, mapstate.STATE_FILE), "w", encoding="utf-8") as f:
+        json.dump(state, f)
+    check(mapstate.needs(out) == ["install"],
+          "a map from before the in-game map fix is only installed again")
+
+    # A step redone makes what came after it stale.
+    mapstate.stamp(out, "build")
+    done = mapstate.done(out)
+    check("compile" not in done and "install" not in done,
+          "building again clears the compile and install it made stale")
+
+
 def check_straight_roads(check) -> None:
     """Knox County roads: every road in grid or 45-degree runs, roads that met
     still meeting, and the buildings beside them moved with them."""
@@ -514,6 +551,7 @@ def main(argv: list[str]) -> int:
         check_updater(check, work)
         check_missing_drive(check)
         check_straight_roads(check)
+        check_mapstate(check, out)
 
         print("error log")
         import zipfile
