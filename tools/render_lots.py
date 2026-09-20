@@ -111,13 +111,17 @@ def main(argv: list[str]) -> int:
     scale = float(opts.get("--scale", 1))
 
     import knoxpaths
-    from knoxbuild.world import WORLD_ORIGIN_CELLS
+    from knoxbuild.world import WORLD_ORIGIN_CELLS, _project_box
 
     if "--world" in argv:
         ox = oy = 0
         lots = map_dir
     else:
-        ox, oy = WORLD_ORIGIN_CELLS[0] * 300, WORLD_ORIGIN_CELLS[1] * 300
+        # The origin this map was built at, not the default one: a PC with
+        # more than one KnoxMap map puts them side by side.
+        name = os.path.basename(os.path.abspath(map_dir).rstrip(os.sep))
+        box = _project_box(os.path.join(map_dir, f"{name}.pzw")) or WORLD_ORIGIN_CELLS
+        ox, oy = box[0] * 300, box[1] * 300
         lots = os.path.join(map_dir, "lots")
     squares: dict[tuple[int, int, int], list[str]] = {}
     top = 0

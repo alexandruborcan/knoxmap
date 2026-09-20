@@ -554,10 +554,12 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
            shape: dict | None = None,
            straight_roads: bool = False) -> RenderResult:
     proj = Projector.build(south, west, north, east, meters_per_tile, rotation)
+    # Read more than once below - the buildings pass goes back over the
+    # address points - so never leave this as a generator.
+    features = list(features)
     if straight_roads:
         # Every road in straight runs at 45-degree steps (octilinear.py).
         from .octilinear import straighten_roads
-        features = list(features)
         straighten_roads(features, proj, classify, _is_polygon)
     # A drawn polygon, circle or real outline rather than a rectangle: the map
     # still covers its bounding box in whole cells, but only what lies inside
@@ -614,6 +616,12 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
         building_feats = [f for f in building_feats if id(f) not in lifted.not_buildings]
         buckets["building"] = [f for f in buckets.get("building", [])
                                if id(f) not in lifted.not_buildings]
+
+    # Streets where every home is an address point and not a drawn building.
+    addressed = _houses_from_addresses(features, building_feats, proj)
+    if addressed:
+        building_feats = building_feats + addressed
+        buckets["building"] = buckets.get("building", []) + addressed
 
     def ground_rings(feat: OSMFeature) -> list[list[tuple[float, float]]]:
         rings = _feature_coords_px(feat, proj)
@@ -685,6 +693,7 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
     _paint_vegetation(vegetation, landscape, vegetation_feats, proj,
                       density=tree_density)
     _paint_gardens(vegetation, landscape, building_feats, proj, density=tree_density)
+    _paint_wild_growth(vegetation, landscape, proj, density=tree_density)
     _clear_building_vegetation(vegetation, building_feats, proj)
     _paint_road_details(vegetation, landscape, buckets, proj)
     _paint_street_furniture(vegetation, landscape)
@@ -1519,11 +1528,14 @@ def _paint_vegetation_extras(veg: Image.Image, landscape: Image.Image,
                             vp[x, y] = C.TREES
                             lp[x, y] = C.DARK_GRASS
                     elif cat == "cemetery":
+                        # A few flowers between the graves, not instead of
+                        # them: the headstones themselves go in later, as
+                        # props (knoxbuild/props.py).
                         roll = rng.random()
                         if roll < 0.012:
                             vp[x, y] = C.TREES
                             lp[x, y] = C.DARK_GRASS
-                        elif roll < 0.08:
+                        elif roll < 0.04:
                             vp[x, y] = C.FLOWERS
                     else:
                         if rng.random() < 0.35:
@@ -1645,6 +1657,70 @@ def _paint_gardens(veg: Image.Image, landscape: Image.Image,
         for x, y in zip(xs[pick].tolist(), ys[pick].tolist()):
             if px[x, y] == C.VEG_NOTHING:
                 px[x, y] = colour
+    return planted
+
+
+# Growth on land nobody mapped.
+#
+# Trees came only from mapped woods, orchards, single-tree nodes and the
+# gardens of houses, so any ground OpenStreetMap says nothing about came out
+# as an unbroken lawn - "more often than not it's the program getting
+# confused and not just a field of nothing". Real open country has scrub and
+# stands of trees in it wherever nobody is farming or mowing.
+#
+# It is kept off light grass, which is what farmland and churchyards are
+# painted, so a wheat field stays a wheat field. And it clumps: one roll per
+# tile puts a tree every so often everywhere, which is an orchard, while a
+# slow noise field over the map gives thickets here and open ground there.
+WILD_TREE_EVERY_M = 11.0
+WILD_CLUMP_M = 70.0            # how far a thicket or a clearing runs
+WILD_TREE_CHANCE = 0.75        # at the thickest, per patch of that size
+WILD_BUSH_SHARE = 0.45         # of what grows, this much is scrub
+WILD_CLEAR_OF_PAVING = 2       # tiles off a kerb, a drive or a path
+WILD_GROUND = (C.DARK_GRASS, C.MEDIUM_GRASS)
+
+
+def _paint_wild_growth(veg: Image.Image, landscape: Image.Image,
+                       proj: Projector, density: float = 1.0) -> int:
+    """Scatter trees and scrub over open grass. Returns what was planted."""
+    import numpy as np
+
+    if density <= 0:
+        return 0
+    ground = np.array(landscape.convert("RGB"))
+    open_ground = np.zeros(ground.shape[:2], dtype=bool)
+    for colour in WILD_GROUND:
+        open_ground |= np.all(ground == colour, axis=2)
+    del ground
+    vegp = np.array(veg.convert("RGB"))
+    bare = np.all(vegp == 0, axis=2)
+    del vegp
+    free = open_ground & bare
+    del bare
+    # Not up against a road, a pavement or a building: those tiles are the
+    # verge, and the road details pass has its own plans for them.
+    free &= ~_box_any(~open_ground, WILD_CLEAR_OF_PAVING)
+    del open_ground
+
+    h, w = free.shape
+    step = max(2, int(round(WILD_TREE_EVERY_M / proj.meters_per_tile)))
+    clump = max(step * 2, int(round(WILD_CLUMP_M / proj.meters_per_tile)))
+    rng = np.random.default_rng(9871)
+    field = rng.random(((h // clump) + 2, (w // clump) + 2)) ** 1.6
+    px = veg.load()
+    planted = 0
+    for y0 in range(0, h, step):
+        for x0 in range(0, w, step):
+            thickness = field[y0 // clump, x0 // clump]
+            if rng.random() >= min(1.0, WILD_TREE_CHANCE * thickness * density):
+                continue
+            ys, xs = np.nonzero(free[y0:y0 + step, x0:x0 + step])
+            if len(xs) == 0:
+                continue
+            i = int(rng.integers(len(xs)))
+            px[int(x0 + xs[i]), int(y0 + ys[i])] = (
+                C.BUSHES if rng.random() < WILD_BUSH_SHARE else C.TREES)
+            planted += 1
     return planted
 
 
@@ -1804,6 +1880,78 @@ def _build_preview(landscape: Image.Image, vegetation: Image.Image) -> Image.Ima
 # building:levels earns its place twice over: it is the only thing in OSM that
 # says how tall a building is, and dropping it meant every block of flats in a
 # town was rebuilt as a bungalow no matter what the mapper had recorded.
+# Houses where the map has an address but no building.
+#
+# In whole countries - and in most American suburbs - the houses are not drawn
+# at all; what the survey left behind is one node per home carrying
+# addr:housenumber. Those streets came out as roads through empty grass. A
+# node with an address on it is a building by definition, so one of a
+# household's size is put there, upright on the grid; the rest of the build
+# treats it like any other footprint, so it is skipped if a real building
+# already covers the spot and it moves off the road like the others do.
+ADDRESS_HOUSE_M = (9.0, 11.0)    # frontage, depth: a small detached house
+ADDRESS_CLEAR_M = 4.0            # keep this far off a mapped building
+ADDRESS_APART_M = 7.0            # and this far from the next address point
+MAX_ADDRESS_HOUSES = 40000
+
+
+def _houses_from_addresses(feats: list["OSMFeature"], buildings: list["OSMFeature"],
+                           proj: "Projector") -> list["OSMFeature"]:
+    """A house-sized footprint for every address that has no building."""
+    from shapely.geometry import Point, Polygon
+    from shapely.strtree import STRtree
+
+    points = [f for f in feats
+              if f.kind == "node" and f.geometry and f.tags.get("addr:housenumber")
+              and not f.tags.get("building")]
+    if not points:
+        return []
+    shapes = []
+    for f in buildings:
+        rings = _feature_coords_px(f, proj)
+        for ring in rings:
+            if len(ring) >= 3:
+                poly = Polygon(ring)
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+                if not poly.is_empty:
+                    shapes.append(poly)
+    tree = STRtree(shapes) if shapes else None
+    clear = ADDRESS_CLEAR_M / proj.meters_per_tile
+    apart = ADDRESS_APART_M / proj.meters_per_tile
+    half_w = (ADDRESS_HOUSE_M[0] / proj.meters_per_tile) / 2
+    half_h = (ADDRESS_HOUSE_M[1] / proj.meters_per_tile) / 2
+    taken: dict[tuple[int, int], list] = {}
+    cell = max(1.0, apart)
+    made = []
+    for f in points:
+        if len(made) >= MAX_ADDRESS_HOUSES:
+            break
+        lat, lon = f.geometry[0]
+        x, y = proj.to_px(lat, lon)
+        if not (-half_w <= x < proj.width + half_w and -half_h <= y < proj.height + half_h):
+            continue
+        here = Point(x, y)
+        if tree is not None:
+            near = tree.query(here.buffer(clear))
+            if any(shapes[int(i)].distance(here) <= clear for i in near):
+                continue
+        key = (int(x // cell), int(y // cell))
+        crowd = [p for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+                 for p in taken.get((key[0] + dx, key[1] + dy), ())]
+        if any(abs(px - x) < apart and abs(py - y) < apart for px, py in crowd):
+            continue
+        taken.setdefault(key, []).append((x, y))
+        ring = [(x - half_w, y - half_h), (x + half_w, y - half_h),
+                (x + half_w, y + half_h), (x - half_w, y + half_h),
+                (x - half_w, y - half_h)]
+        tags = {k: v for k, v in f.tags.items() if k in BUILDING_TAGS}
+        tags.setdefault("building", "house")
+        made.append(OSMFeature(osm_id=f.osm_id, kind="way", tags=tags,
+                               geometry=[proj.to_latlon(px, py) for px, py in ring]))
+    return made
+
+
 BUILDING_TAGS = {
     "building", "building:levels", "building:part", "building:material",
     "building:use", "height", "levels", "roof:levels", "roof:shape",

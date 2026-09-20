@@ -26,6 +26,119 @@ CELL_SIZE = 300
 # to spare.
 WORLD_ORIGIN_CELLS = (70, 0)
 
+# ...and where the *next* map sits, because two of them cannot sit in the
+# same place. Every map used to be built at 70,0, so a player with two
+# KnoxMap maps installed had both claiming the same cells: the game reads
+# one cell's header and the other cell's data and falls over on the way in.
+#
+# So each map is given the first free run of cells east of the ones already
+# built or installed, with a cell or two of empty ground between. They stay
+# packed tight on purpose - the game lays out one grid covering every cell
+# any map uses, so maps scattered across the world would be a grid mostly
+# made of nothing. The first map on a PC still lands on 70,0, so nothing
+# already built moves.
+ORIGIN_GAP_CELLS = 2
+
+_ORIGIN = list(WORLD_ORIGIN_CELLS)
+
+
+def origin() -> tuple[int, int]:
+    """Where the map being built now sits, in 300-tile cells."""
+    return (_ORIGIN[0], _ORIGIN[1])
+
+
+def set_origin(value) -> None:
+    _ORIGIN[0], _ORIGIN[1] = int(value[0]), int(value[1])
+
+
+def _project_box(pzw_path: str) -> tuple[int, int, int, int] | None:
+    """(origin x, origin y, cells across, cells down) out of a .pzw."""
+    import re
+    try:
+        with open(pzw_path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return None
+    o = re.search(r'<worldOrigin origin="(-?\d+),(-?\d+)"', text)
+    w = re.search(r'<world version="[^"]*" width="(\d+)" height="(\d+)"', text)
+    if not (o and w):
+        return None
+    return int(o.group(1)), int(o.group(2)), int(w.group(1)), int(w.group(2))
+
+
+def _installed_boxes() -> list[tuple[int, int, int, int]]:
+    """Where the maps already installed on this PC sit, from the names of
+    their compiled cells (<base>_<cell x>_<cell y>.lotheader). Compiled cells
+    are 256 tiles, not 300, so they are converted back."""
+    import os
+    import re
+
+    try:
+        import knoxpaths
+        mods = knoxpaths.zomboid_user_dir() / "mods"
+    except Exception:      # noqa: BLE001 - no Zomboid folder, nothing installed
+        return []
+    boxes = []
+    if not mods.is_dir():
+        return []
+    for maps in mods.glob("*/common/media/maps/*"):
+        cells = []
+        try:
+            entries = os.listdir(maps)
+        except OSError:
+            continue
+        for entry in entries:
+            m = re.fullmatch(r".*_(\d+)_(\d+)\.lotheader", entry)
+            if m:
+                cells.append((int(m.group(1)), int(m.group(2))))
+        if not cells:
+            continue
+        x0 = min(c[0] for c in cells) * 256 // CELL_SIZE
+        y0 = min(c[1] for c in cells) * 256 // CELL_SIZE
+        x1 = (max(c[0] for c in cells) + 1) * 256
+        y1 = (max(c[1] for c in cells) + 1) * 256
+        boxes.append((x0, y0, -(-x1 // CELL_SIZE) - x0, -(-y1 // CELL_SIZE) - y0))
+    return boxes
+
+
+def choose_origin(out_dir: str, cells_x: int, cells_y: int) -> tuple[int, int]:
+    """A run of free cells for this map, keeping the one it already has.
+
+    A map that has been built before keeps its place, so rebuilding it does
+    not move a town out from under anybody's save.
+    """
+    import os
+
+    here = os.path.abspath(out_dir)
+    name = os.path.basename(here.rstrip(os.sep))
+    mine = _project_box(os.path.join(here, f"{name}.pzw"))
+    if mine:
+        return mine[0], mine[1]
+
+    taken = _installed_boxes()
+    root = os.path.dirname(here)
+    try:
+        siblings = os.listdir(root)
+    except OSError:
+        siblings = []
+    for entry in siblings:
+        folder = os.path.join(root, entry)
+        if not os.path.isdir(folder) or os.path.abspath(folder) == here:
+            continue
+        box = _project_box(os.path.join(folder, f"{entry}.pzw"))
+        if box:
+            taken.append(box)
+
+    ox, oy = WORLD_ORIGIN_CELLS
+    for _ in range(len(taken) + 1):
+        clash = [b for b in taken
+                 if b[0] < ox + cells_x + ORIGIN_GAP_CELLS and ox < b[0] + b[2] + ORIGIN_GAP_CELLS
+                 and b[1] < oy + cells_y + ORIGIN_GAP_CELLS and oy < b[1] + b[3] + ORIGIN_GAP_CELLS]
+        if not clash:
+            break
+        ox = max(b[0] + b[2] for b in clash) + ORIGIN_GAP_CELLS
+    return ox, oy
+
 # Lot-export worker threads.
 #
 # WorldEd defaults to one per core, up to 16. Each worker holds a whole
@@ -150,7 +263,7 @@ def render_pzw(cells_x: int, cells_y: int, bmp_name: str,
         f'  <exportdir path={quoteattr(lots_dir)}/>',
         f'  <ZombieSpawnMap path={quoteattr(spawn_map)}/>',
         '  <TileDefFolder path=""/>',
-        f'  <worldOrigin origin="{WORLD_ORIGIN_CELLS[0]},{WORLD_ORIGIN_CELLS[1]}"/>',
+        f'  <worldOrigin origin="{origin()[0]},{origin()[1]}"/>',
         f'  <numberOfThreads count="{GENERATE_LOTS_THREADS}"/>',
         " </GenerateLots>",
         " <LuaSettings>",
@@ -189,9 +302,9 @@ def render_pzw(cells_x: int, cells_y: int, bmp_name: str,
     def cell_map(cx: int, cy: int) -> str:
         if not base:
             return ""
+        ox, oy = origin()
         path = os.path.join(tmx_dir, f"{bmp_base}_"
-                            f"{WORLD_ORIGIN_CELLS[0] + cx}_"
-                            f"{WORLD_ORIGIN_CELLS[1] + cy}.tmx")
+                            f"{ox + cx}_{oy + cy}.tmx")
         return path.replace("\\", "/") if os.path.exists(path) else ""
 
     # Every cell in the grid, not just the ones holding something: Generate Lots

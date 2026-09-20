@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.3.6
+
+Everything in here works off tags OpenStreetMap uses the world over, so it
+lands the same way on a town in Kentucky, in Australia or in Turkey.
+
+- **A row of shops is a row of shops.** A parade, a strip mall or a terrace
+  of houses is usually one outline on the map - the mapper drew the block,
+  not the seven front doors in it - and it used to come out as one enormous
+  shed with a single door. It is now cut into units of about a shop's
+  frontage, each its own building standing wall to wall with the next, and
+  the shops mapped inside the row are dealt out along it.
+- **Loot in every container, however big the building.** The game caps how
+  many containers in one room it will fill - for most household and office
+  loot the limit is one, two or four - so a huge room had loot at one end and
+  bare shelves at the other, which is why a big building "stopped spawning
+  loot at some point". No room is bigger than about eleven tiles square any
+  more, whatever the building is.
+- **Police stations, libraries and fire stations** are laid out as what they
+  are, with the game's own rooms: cells, lockers, an evidence store, an
+  interrogation room and a gun store in a station; reading rooms in a
+  library; the appliance bay and the gear store in a fire station. All three
+  used to be an office block with a cupboard.
+- **Graveyards have graves in them.** Headstones in rows with paths between,
+  the odd wooden cross and now and then an angel - instead of a lawn with
+  flowers on it.
+- **Army bases exist.** `military=*` - armoury, barracks, hangar, checkpoint,
+  training area - was not read at all, so an armoury came out as somebody's
+  house. Bases are now fenced off with wire whether or not anyone drew the
+  fence, and there are supply crates and drums on the apron.
+- **Houses where the map only has an address.** In whole countries, and in
+  most American suburbs, the houses are not drawn: what the survey left is
+  one point per home with its number on it. Those streets used to be roads
+  through empty grass; each address now gets a house.
+- **Open country is not a bowling green.** Ground nobody mapped had not one
+  tree on it. Trees and scrub are now scattered over open grass, in thickets
+  and clearings rather than evenly - and never over farmland, which stays a
+  field.
+- **Turn the map** by hand: a new setting, in degrees, on top of Straighten
+  streets, for a city where the automatic angle picks the wrong grid.
+- **Two KnoxMap maps can be installed at once.** Every map used to be built
+  at the same place in the world, so a second one claimed the same cells as
+  the first and the game fell over on the way in. Each map now takes the
+  first free run of cells beside the ones already there; the first map on a
+  PC does not move.
+- Installing clears the old map out of the mod folder first. A map rebuilt
+  smaller used to ship its old cells alongside the new ones.
+
 ## 1.3.5
 
 - A version menu: click the version at the top of the window for every

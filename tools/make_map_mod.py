@@ -430,6 +430,16 @@ def package(project_dir: str, name: str, mod_id: str,
     mod_root = os.path.join(mods_dir, mod_id)
     map_dir = os.path.join(mod_root, "common", "media", "maps",
                            folder_name(name, mod_id))
+    # Clear the old map out first.
+    #
+    # Installing over a map that had been built again left every cell file
+    # from the run before it sitting beside the new ones. A map rebuilt
+    # smaller, or over a different area, then shipped cells from both: the
+    # game reads one cell's header with another cell's data, and falls over
+    # on the way in. Nothing in here is written by anything but this, so it
+    # all goes.
+    if os.path.isdir(map_dir):
+        shutil.rmtree(map_dir, ignore_errors=True)
     os.makedirs(map_dir, exist_ok=True)
 
     for src in cells + extras:

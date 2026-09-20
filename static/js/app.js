@@ -324,6 +324,7 @@ const SETTING_LABELS = {
   seed:                ['Seed', 'Same seed and area gives the same town again.'],
   min_size:            ['Smallest building', 'Buildings narrower than this many tiles are left out.'],
   align_streets:       ['Straighten streets', '1 turns the map so the main street grid runs along the tiles - no staircase roads. 0 keeps north up.'],
+  rotate_degrees:      ['Turn the map', 'Degrees to turn the whole area before it is built, on top of Straighten streets. Use it when the automatic angle picks the wrong grid.'],
   straight_roads:      ['Knox County roads', '1 lays every road in straight runs along the tiles and on 45-degree diagonals, and stands every building upright beside them, like the game’s own map. 0 draws roads as they are.'],
   max_size:            ['Largest building', 'Footprints above this are skipped.'],
   apartment_footprint: ['Flats above', 'An untagged footprint this big reads as flats.'],

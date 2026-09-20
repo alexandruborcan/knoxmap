@@ -2896,7 +2896,17 @@ ERIKA_SIGNS = {'N': [['signs_erika_01_000',
        ['signs_erika_02_027', 'signs_erika_02_026', 'signs_erika_02_025', 'signs_erika_02_024']]}
 
 # Official room colours, straight from the tools' RoomNames.txt.
-ROOM_COLORS = {'livingroom': '233 112 19',
+ROOM_COLORS = {'policehall': '171 217 174',
+ 'policelocker': '211 74 9',
+ 'policeoutfitstorage': '102 164 69',
+ 'policestorage': '110 118 246',
+ 'policegunstorage': '10 198 66',
+ 'policearchive': '138 108 71',
+ 'interrogationroom': '218 41 17',
+ 'cells': '141 215 71',
+ 'firegarage': '102 145 188',
+ 'firestorage': '21 177 44',
+ 'livingroom': '233 112 19',
  'kitchen': '246 172 101',
  'bedroom': '26 26 52',
  'bathroom': '15 66 251',

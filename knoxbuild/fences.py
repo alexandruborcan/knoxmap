@@ -48,6 +48,23 @@ def _tile(n: int) -> str:
     return f"fencing_01_{n:03d}"
 
 
+# Land uses that are fenced off in real life, and their smallest size in
+# tiles - a hundred-tile "base" is a war memorial, not a barracks.
+FENCED_SITES = {"military": 400}
+
+
+def _fenced_sites(areas) -> list:
+    """The land-use polygons that get a fence of their own."""
+    out = []
+    for shape, props in getattr(areas, "_items", []) or ():
+        least = FENCED_SITES.get((props.get("category") or ""))
+        if least is None or shape.is_empty or shape.area < least:
+            continue
+        if getattr(shape, "exterior", None) is not None:
+            out.append(shape)
+    return out
+
+
 def style_for(tags: dict, area: str | None) -> str:
     """Which fence a line gets: from its own tags first, its surroundings next."""
     barrier = tags.get("barrier")
@@ -136,7 +153,8 @@ def build_fences(out_dir: str, map_name: str, proj, occupied, areas,
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
             lines = json.load(f).get("features", [])
-    if not lines and not extra:
+    sites = _fenced_sites(areas)
+    if not lines and not extra and not sites:
         return [], 0
 
     map_h, map_w = occupied.shape
@@ -172,6 +190,15 @@ def build_fences(out_dir: str, map_name: str, proj, occupied, areas,
         mid = pts[len(pts) // 2]
         todo.append((pts, style_for(feat.get("properties") or {},
                                     areas.category_at(*mid) if areas else None)))
+    # Sites that are fenced in the world whether or not anyone drew the fence.
+    # OpenStreetMap maps an army base as landuse=military far more often than
+    # it maps the wire round it, so a base was open ground you could walk
+    # across; the outline of the site is the fence. Road crossings are left
+    # open by the rule above, which is what makes the gates.
+    for shape in sites:
+        ring = list(shape.exterior.coords)
+        if len(ring) >= 4:
+            todo.append(([(float(x), float(y)) for x, y in ring], "tall_chainlink"))
     gates: dict[tuple[int, int], str] = {}
     for item in extra or ():
         pts, style = item[0], item[1]

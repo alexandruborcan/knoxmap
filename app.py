@@ -136,11 +136,7 @@ def api_report_save():
     knoxlog.LOG_DIR.mkdir(exist_ok=True)
     path.write_bytes(knoxlog.report_zip(OUTPUT_DIR))
     log.info("problem report saved: %s", path.name)
-    try:
-        import subprocess
-        subprocess.Popen(["explorer", "/select,", str(path)])
-    except OSError:
-        pass
+    knoxlog.open_folder(path)
     return jsonify({"name": path.name, "path": str(path)})
 
 
@@ -630,7 +626,8 @@ def generate():
     # the box, measure the angle, then fetch the turned map's bounds as well -
     # the same town twice over, about 2.4 times the data. Now one download
     # covers the map at any angle: the circle round it, as a box.
-    if settings.align_streets:
+    turned = bool(settings.align_streets) or bool(settings.rotate_degrees)
+    if turned:
         fetch_box = renderer.cover_bbox(south, west, north, east, meters_per_tile)
         cache = osm.cache_path(str(map_dir), f"{map_name}_turned")
     else:
@@ -666,6 +663,8 @@ def generate():
         angle, strength = renderer.dominant_road_angle(features, *bbox)
         if strength >= renderer.ALIGN_MIN_STRENGTH and abs(angle) >= 0.5:
             rotation = -angle
+    # And whatever turn the mapper asked for on top of that.
+    rotation += float(settings.rotate_degrees)
     osm_cache_name = Path(cache).name
     osm_bbox = fetch_box
 
@@ -884,14 +883,16 @@ def api_worlded():
     map_dir = _map_dir(data.get("mapName", ""))
     if map_dir is None:
         return jsonify({"error": "Unknown map."}), 404
+    import knoxpaths
+
     exe = _worlded_exe()
     if exe is None:
-        return jsonify({"error": "PZWorldEd.exe not found. Set the PZWORLDED "
+        return jsonify({"error": "PZWorldEd not found. Set the PZWORLDED "
                                  "environment variable to its full path."}), 400
     pzw = map_dir / f"{map_dir.name}.pzw"
     if not pzw.exists():
         return jsonify({"error": "No .pzw yet — generate the buildings first."}), 400
-    subprocess.Popen([str(exe), str(pzw)])
+    subprocess.Popen(knoxpaths.command_for(exe) + [str(pzw)])
     return jsonify({"launched": str(pzw)})
 
 
@@ -1041,10 +1042,13 @@ def _expected_cells(map_dir: Path) -> int:
             info = json.load(f)
     except Exception:
         return 0
-    from knoxbuild.world import CELL_SIZE, WORLD_ORIGIN_CELLS
+    from knoxbuild.world import CELL_SIZE, WORLD_ORIGIN_CELLS, _project_box
 
-    ox = WORLD_ORIGIN_CELLS[0] * CELL_SIZE
-    oy = WORLD_ORIGIN_CELLS[1] * CELL_SIZE
+    # Where this map was actually built, which is not 70,0 once a PC holds
+    # more than one of them (knoxbuild/world.py choose_origin).
+    box = _project_box(str(map_dir / f"{map_dir.name}.pzw"))
+    ox = (box[0] if box else WORLD_ORIGIN_CELLS[0]) * CELL_SIZE
+    oy = (box[1] if box else WORLD_ORIGIN_CELLS[1]) * CELL_SIZE
     w = info.get("cells_x", 0) * CELL_SIZE
     h = info.get("cells_y", 0) * CELL_SIZE
     x0, x1 = ox // 256, (ox + w + 255) // 256

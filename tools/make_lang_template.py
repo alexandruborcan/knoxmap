@@ -83,7 +83,7 @@ def script_strings(paths) -> list[str]:
     for path in paths:
         text = open(path, encoding="utf-8").read()
         for quote in ("'", '"'):
-            for piece in re.findall(rf"{quote}([^{quote}\\\n]{{6,120}}){quote}", text):
+            for piece in re.findall(rf"{quote}([^{quote}\\\n]{{6,220}}){quote}", text):
                 piece = piece.strip()
                 if is_words(piece) and re.search(r"[A-Za-z]{2,}\s+[A-Za-z]", piece):
                     found.append(piece)

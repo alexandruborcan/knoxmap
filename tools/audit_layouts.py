@@ -21,7 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from knoxbuild.layout import ELEVATOR_FROM_LEVELS, ELEVATOR_MIN_SIDE, STAIR_RUN, build_building, roof_rects  # noqa: E402
 
 KINDS = [None, None, "apartment", "apartment", "shop", "school", "civic",
-         "church", "medical", "restaurant", "shed"]
+         "church", "medical", "restaurant", "shed",
+         "police", "library", "fire", "military", "industrial"]
 
 
 def door_pair(storey, door):

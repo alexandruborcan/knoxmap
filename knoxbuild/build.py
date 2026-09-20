@@ -100,7 +100,7 @@ THEATRE_MAX_LEVELS = 3
 # against the building/amenity/shop/leisure/tourism/healthcare tags in turn.
 SPECIAL_BY_VALUE = {
     "school": "school", "kindergarten": "school", "college": "school",
-    "university": "school", "childcare": "school", "library": "civic",
+    "university": "school", "childcare": "school", "library": "library",
     "church": "church", "chapel": "church", "cathedral": "church",
     "mosque": "church", "synagogue": "church", "temple": "church",
     "place_of_worship": "church",
@@ -118,12 +118,18 @@ SPECIAL_BY_VALUE = {
     "apartments": "apartment", "residential": "apartment",
     "dormitory": "apartment", "terrace": "apartment",
     "civic": "civic", "public": "civic", "government": "civic",
-    "townhall": "civic", "police": "civic", "fire_station": "civic",
+    "townhall": "civic",
+    # A police station, a library and a fire station have rooms of their own
+    # in the game, with the loot that goes in them. As "civic" they came out
+    # as an office block with a storeroom, which is what players reported
+    # when a station they knew had nothing in it.
+    "police": "police", "prison": "police", "fire_station": "fire",
     "hotel": "civic", "office": "civic", "courthouse": "civic",
     "museum": "civic", "bank": "civic", "post_office": "civic",
     "theatre": "civic", "cinema": "civic", "arts_centre": "civic",
     # Bases: barracks, armouries, the offices and stores of a military site.
     "military": "military", "barracks": "military", "bunker": "military",
+    "armory": "military", "armoury": "military",
 }
 
 # Last resort when the tags say nothing useful but the name is obvious.
@@ -136,7 +142,12 @@ SPECIAL_BY_NAME = [
     ("market", "shop"), ("mall", "shop"), ("store", "shop"), ("shop", "shop"),
     ("diner", "restaurant"), ("restaurant", "restaurant"), ("grill", "restaurant"),
     ("cafe", "restaurant"), ("bar ", "restaurant"), ("barn", "barn"),
-    ("library", "civic"), ("bank", "civic"), ("city hall", "civic"),
+    ("library", "library"), ("bibliot", "library"), ("kütüphane", "library"),
+    ("police", "police"), ("polizei", "police"), ("polic", "police"),
+    ("karakol", "police"), ("politie", "police"), ("gendarm", "police"),
+    ("fire station", "fire"), ("feuerwehr", "fire"), ("itfaiye", "fire"),
+    ("caserne de pompiers", "fire"), ("brandweer", "fire"),
+    ("bank", "civic"), ("city hall", "civic"),
     ("apartment", "apartment"), ("apartmani", "apartment"),
     ("residence", "apartment"), ("towers", "apartment"), ("blok", "apartment"),
 ]
@@ -157,7 +168,96 @@ DEFAULT_LEVELS = {
     "shop": (1, 2),
     "restaurant": (1, 2),
     "military": (1, 2),
+    "police": (1, 2),
+    "library": (1, 2),
+    "fire": (1, 1),
 }
+
+# Rows of units under one outline.
+#
+# OpenStreetMap maps a parade of shops, a strip mall or a terrace of houses as
+# one polygon more often than not - the mapper drew the block, not the seven
+# front doors in it - and built as one building it came out as a single shed
+# with one door and one enormous room, whatever country the map was of. A
+# footprint this much longer than it is deep, and no deeper than a shop unit
+# is, is cut into units instead (footprint.split_row).
+#
+# Everything here is in metres, not tiles, so a map drawn at 2 m a tile splits
+# the same row the same way as one drawn at half a metre.
+ROW_KINDS = {None, "house", "apartment", "shop", "restaurant"}
+ROW_RATIO = 2.2          # long side over short side
+ROW_MIN_DEPTH_M = 5.0    # any shallower and a unit has no room in it
+ROW_MAX_DEPTH_M = 32.0   # any deeper and it is a big shop, not a row
+ROW_MIN_LENGTH_M = 22.0
+# Frontages: a terraced house is narrower than a shop unit.
+UNIT_FRONTAGE_M = {"house": 9.0, "apartment": 9.0}
+SHOP_FRONTAGE_M = 13.0
+# building=* values that say "row of houses" outright, in the countries whose
+# mappers use them.
+TERRACE_TAGS = {"terrace", "terraced", "semidetached_house", "row_house"}
+
+
+# And a building too big to be one building whatever it is.
+#
+# A room may be no bigger than the game will fill (layout.MAX_ROOM_AREA), so a
+# footprint of forty thousand tiles came out as five hundred rooms in one
+# .tbx - more than any hand-made building in the game has, and slow to lay
+# out. Past this it is cut into blocks that stand wall to wall, which is what
+# a shopping centre or a works of that size is anyway.
+BIG_BUILDING_M2 = 6000.0
+
+
+def _cut_big(units: list, metres_per_tile: float) -> list:
+    """Cut anything left that is still too big to be one building."""
+    import math
+
+    from .footprint import split_row
+
+    side = max(8, int(math.sqrt(BIG_BUILDING_M2) / max(0.05, metres_per_tile)))
+    limit = side * side
+    out = list(units)
+    for _ in range(4):
+        if all(u.width * u.height <= limit for u in out):
+            break
+        nxt = []
+        for u in out:
+            nxt.extend(split_row(u, side) if u.width * u.height > limit else [u])
+        if len(nxt) == len(out):
+            break
+        out = nxt
+    return out
+
+
+def row_units(fp, special: str | None, btag: str, n_uses: int,
+              metres_per_tile: float):
+    """One footprint per unit of a row, or the footprint as it stands."""
+    from .footprint import split_row
+
+    if special not in ROW_KINDS and btag not in TERRACE_TAGS:
+        return _cut_big([fp], metres_per_tile)
+    long_side = max(fp.width, fp.height) * metres_per_tile
+    short_side = min(fp.width, fp.height) * metres_per_tile
+    if short_side < ROW_MIN_DEPTH_M or long_side < ROW_MIN_LENGTH_M:
+        return _cut_big([fp], metres_per_tile)
+    terrace = btag in TERRACE_TAGS
+    if not terrace:
+        if short_side > ROW_MAX_DEPTH_M or long_side < short_side * ROW_RATIO:
+            return _cut_big([fp], metres_per_tile)
+    frontage = UNIT_FRONTAGE_M.get(special or "house", SHOP_FRONTAGE_M)
+    if n_uses > 1:
+        # The shops mapped inside it say how many units there really are;
+        # keep the frontage sane so two shops in a long parade do not become
+        # two units of fifty metres.
+        frontage = min(max(frontage, long_side / n_uses), frontage * 2)
+    return _cut_big(split_row(fp, max(5, int(round(frontage / metres_per_tile)))),
+                    metres_per_tile)
+
+
+# Kinds with no walls and windows of their own (knoxbuild/catalog.py
+# SPECIAL_STYLES), dressed as the nearest kind that has: an army base is
+# built like a works, a station or a library like any other public building.
+STYLE_AS = {"military": "industrial", "fire": "industrial",
+            "police": "civic", "library": "civic"}
 
 
 # A footprint this big, with nothing but building=yes on it, is a block of
@@ -256,7 +356,7 @@ def building_levels(tags: dict, kind: str | None, area_tiles: int,
 def classify_building(tags: dict) -> str | None:
     """The special kind for this building, or None for an ordinary one."""
     for key in ("amenity", "shop", "healthcare", "leisure", "tourism",
-                "office", "industrial", "craft", "building"):
+                "office", "industrial", "craft", "military", "building"):
         value = (tags.get(key) or "").strip().lower()
         if not value:
             continue
@@ -267,6 +367,11 @@ def classify_building(tags: dict) -> str | None:
             return "shop"
         if key == "healthcare":
             return "medical"
+        # military=* is the key mappers use for everything on a base -
+        # armory, barracks, checkpoint, office, hangar, depot - and it was
+        # not read at all, so an armoury came out as somebody's house.
+        if key == "military" and value != "no":
+            return "military"
     name = (tags.get("name") or "").lower()
     for needle, kind in SPECIAL_BY_NAME:
         if needle in name:
@@ -667,6 +772,13 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
               "from a different Knoxify version?", file=sys.stderr)
         return 2
 
+    # Where this map stands in the world, beside any other KnoxMap map on
+    # this PC rather than on top of it (knoxbuild/world.py). Everything
+    # below - the paper map, the zones, the compiled cells - is written from
+    # here on, so it is settled first.
+    from .world import choose_origin, origin, set_origin
+    set_origin(choose_origin(out_dir, info["cells_x"], info["cells_y"]))
+
     # Record what this build actually used, whoever started it. Without this
     # a map generated from the command line cannot be reproduced, and the app
     # and the CLI disagree about what a folder was built with.
@@ -702,6 +814,8 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     from_osm = 0   # buildings whose storey count came from the data
     from_area = 0  # buildings whose kind came from the land around them
     squared = 0    # buildings close enough to the grid to square up
+    rows_split = 0   # rows of shops or terraces cut into their units
+    units_made = 0   # and how many buildings those became
 
     areas = AreaIndex.load(out_dir, map_name, proj)
     points = _points_of_use(out_dir, info, map_name, proj)
@@ -759,7 +873,6 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
             skipped[reason] += 1
             continue
         x0, y0, w, h = fp.x0, fp.y0, fp.width, fp.height
-        mask = fp.mask_list()
         if fp.angle <= 8.0:
             squared += 1
 
@@ -833,23 +946,45 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
             offices = ("office", "office") in uses or btag == "office" or re.search(
                 r"\b(tower|building|plaza|center|centre|exchange)\b", tags.get("name") or "", re.I)
             special = "civic" if offices else "apartment"
-        # Hotels are dressed as the city's big buildings, army bases as works.
-        style = pick_style("civic" if hotel else "industrial" if special == "military" else special,
+        # Hotels are dressed as the city's big buildings, army bases as works,
+        # and the public buildings that have no walls of their own as civic.
+        style = pick_style(STYLE_AS.get("civic" if hotel else special, special),
                            x0, y0, style_rng, settings,
                            density=context.density(cx, cy))
 
-        fname = f"{map_name}_{i:04d}.tbx"
-        label = tags.get("name") or f"{map_name} building {i}"
-        jobs.append((w, h, levels, commercial, seed + i, special, mask,
-                     settings, style, label, os.path.join(bdir, fname),
-                     street_side(x0, y0, w, h),
-                     # Shops under flats where the town is built up.
-                     context.density(cx, cy) >= RETAIL_DENSITY,
-                     # What the ground floor really is, and a hotel's rooms.
-                     uses, hotel))
-        decided.append((fname, label, x0, y0, w, h, fp, px, special, measured,
-                        commercial, style, mask,
-                        (tags.get("name") or "") if is_notable(tags, special) else ""))
+        name = tags.get("name") or ""
+        real_name = name if is_notable(tags, special) else ""
+        # A row of shops or a terrace of houses is one polygon here; built as
+        # one building it is the "uber building" players reported. Each unit
+        # becomes its own building, standing wall to wall with the next.
+        units = row_units(fp, special, btag, len(uses), metres_per_tile)
+        if len(units) > 1:
+            rows_split += 1
+            units_made += len(units)
+        for n, unit in enumerate(units):
+            ux0, uy0 = unit.x0, unit.y0
+            uw, uh = unit.width, unit.height
+            umask = unit.mask_list()
+            # Each unit keeps one of the uses found in the whole row, in the
+            # order they were found, so a parade of shops is a parade and not
+            # seven copies of the same one.
+            unit_uses = [uses[n % len(uses)]] if uses and len(units) > 1 else uses
+            fname = f"{map_name}_{i:04d}.tbx" if len(units) == 1 else \
+                f"{map_name}_{i:04d}_{n:02d}.tbx"
+            label = (f"{name} {n + 1}" if name and len(units) > 1 else
+                     name or f"{map_name} building {i}")
+            jobs.append((uw, uh, levels, commercial, seed + i * 31 + n, special, umask,
+                         settings, style, label, os.path.join(bdir, fname),
+                         street_side(ux0, uy0, uw, uh),
+                         # Shops under flats where the town is built up.
+                         context.density(cx, cy) >= RETAIL_DENSITY,
+                         # What the ground floor really is, and a hotel's rooms.
+                         unit_uses, hotel))
+            outline = px if len(units) == 1 else [
+                (ux0, uy0), (ux0 + uw, uy0), (ux0 + uw, uy0 + uh), (ux0, uy0 + uh)]
+            decided.append((fname, label, ux0, uy0, uw, uh, unit, outline, special,
+                            measured, commercial, style, umask,
+                            real_name if n == 0 else ""))
 
     # Walls shared with the building next door, now every building has its
     # tiles: no window, shop window or door goes in one, up to the height of
@@ -907,6 +1042,13 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     pump_placements, n_pumps = place_pumps(out_dir, map_name, bdir, occupied,
                                            stations, loose_fuel, forecourts, canopies)
 
+    # Headstones in the churchyards, stores on the army bases: land uses that
+    # are neither a building nor a colour of ground.
+    from .props import place_props
+    prop_placements, prop_counts = place_props(out_dir, map_name, bdir, occupied,
+                                               areas, metres_per_tile,
+                                               seed=seed + 5)
+
     fence_placements, fence_tiles = build_fences(out_dir, map_name, proj,
                                                  occupied, areas, bdir,
                                                  extra=yard_fences)
@@ -934,7 +1076,8 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     # town zones: a fence lot spans its whole cell and would mark it all town.
     from .structures import build_structures
     structure_placements, raised = build_structures(out_dir, map_name, bdir)
-    placements = placements + fence_placements + structure_placements + pump_placements
+    placements = (placements + fence_placements + structure_placements +
+                  pump_placements + prop_placements)
 
     pzw_path = os.path.join(out_dir, f"{map_name}.pzw")
     with open(pzw_path, "w", encoding="utf-8") as f:
@@ -969,6 +1112,7 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
           f"{squared} squared up ({shaped} with irregular outlines)")
     print(f"  kind from land use  : {from_area}")
     print(f"  sheds and garages   : {sheds}")
+    print(f"  rows cut into units : {rows_split} rows -> {units_made} buildings")
     print(f"  storeys from nearby : {from_near}")
     storeys = _c.Counter(r["levels"] for r in rows)
     print(f"  storeys             : {dict(sorted(storeys.items()))}")
@@ -977,6 +1121,7 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
           f"rest inferred from footprint")
     print(f"  rooms               : {total_rooms}")
     print(f"  furniture pieces    : {total_furn}")
+    print(f"world origin          : cell {origin()[0]},{origin()[1]}")
     print(f"wrote {pzw_path}")
     print(f"wrote {csv_path}")
     n_park = sum(1 for z in zones if z.kind == "ParkingStall")
@@ -985,6 +1130,8 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     print(f"petrol stations       : {n_pumps} pumps at {len(stations)} stations"
           f", {len(canopies)} canopies and {len(loose_fuel)} points")
     print(f"front paths, yards    : {paths} houses, {len(yard_fences)} back yards")
+    print(f"graves, army stores  : {prop_counts['graves']} graves, "
+          f"{prop_counts['dumps']} stacks of stores")
     print(f"fences                : {fence_tiles} fence tiles in "
           f"{len(fence_placements)} lots")
     print(f"bridges, monuments    : {raised['bridges']} bridges, "

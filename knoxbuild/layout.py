@@ -29,8 +29,9 @@ MIN_SPLIT = MIN_ROOM * 2 + 1
 TARGET_ROOM_AREA = 56
 # Only a safety net against runaway recursion; TARGET_ROOM_AREA is what should
 # decide when to stop. At 5 the cap bound first and left 18x18 living rooms in
-# large buildings.
-MAX_DEPTH = 8
+# large buildings, and at 8 a warehouse 200 tiles across still did. There is
+# no cost to a generous cap: the target area is what decides.
+MAX_DEPTH = 16
 
 
 @dataclass
@@ -177,6 +178,28 @@ ROOM_STYLE = {
     "theatre": (C.FLOOR_CARPET_RED, "Theatre", ["plant", "painting"]),
     "policeoffice": (C.FLOOR_LINO, "Police Office",
                      ["desk", "office_chair", "filing_cabinet", "corkboard", "water_cooler"]),
+    # The rest of a police station. Every name is one of the game's own, so
+    # the uniforms, the guns and the evidence lockers spawn where they should.
+    "policehall": (C.FLOOR_LINO, "Police Hall",
+                   ["shop_counter", "corkboard", "chair", "plant", "painting"]),
+    "policelocker": (C.FLOOR_LINO, "Police Lockers",
+                     ["wardrobe", "wardrobe", "shelf", "chair", "wardrobe_pale"]),
+    "policeoutfitstorage": (C.FLOOR_LINO, "Police Outfit Storage",
+                            ["wardrobe", "metal_rack", "shelf", "crate"]),
+    "policestorage": (C.FLOOR_LINO, "Police Storage",
+                      ["metal_rack", "shelf", "crate", "filing_cabinet"]),
+    "policegunstorage": (C.FLOOR_LINO, "Police Gun Storage",
+                         ["metal_rack", "wardrobe", "crate", "shelf"]),
+    "policearchive": (C.FLOOR_LINO, "Police Archive",
+                      ["filing_cabinet", "filing_cabinet", "shelf", "desk", "office_chair"]),
+    "interrogationroom": (C.FLOOR_LINO, "Interrogation Room",
+                          ["table", "chair", "chair", "mirror"]),
+    "cells": (C.FLOOR_LINO, "Cells", ["bed", "toilet", "sink"]),
+    # A fire station: the appliance bay, the gear and the crew's quarters.
+    "firegarage": (C.FLOOR_LINO, "Fire Garage",
+                   ["metal_rack", "crate", "counter", "shelf"]),
+    "firestorage": (C.FLOOR_LINO, "Fire Storage",
+                    ["wardrobe", "metal_rack", "shelf", "crate"]),
     "daycare": (C.FLOOR_CARPET_BLUE, "Daycare",
                 ["table", "chair", "chair", "bookshelf", "shag_rug", "plant"]),
     "mechanic": (C.FLOOR_LINO, "Mechanic", ["metal_rack", "crate", "counter", "metal_rack"]),
@@ -279,6 +302,23 @@ SPECIAL_MIXES = {
     "civic":      (["office", "lobby", "office", "storage", "bathroom",
                     "library"],
                    ["office", "storage"]),
+    # A police station was "civic" - offices and a storeroom - so the one
+    # thing players go to a police station for was not in it. These are the
+    # game's own police rooms, which is what puts the uniforms, the evidence
+    # and the guns behind the counter.
+    "police":     (["policeoffice", "policehall", "policelocker",
+                    "interrogationroom", "policestorage", "bathroom",
+                    "policearchive", "policeoutfitstorage", "policegunstorage",
+                    "cells"],
+                   ["policeoffice", "policestorage", "policelocker"]),
+    # A library is its reading rooms, not an office block with one in it.
+    "library":    (["library", "library", "lobby", "office", "bathroom",
+                    "storage", "library"],
+                   ["library", "library", "office"]),
+    # A fire station: the appliance bay, the gear store and the crew's rooms.
+    "fire":       (["firegarage", "firestorage", "office", "bedroom",
+                    "kitchen", "bathroom", "firestorage"],
+                   ["firestorage", "firegarage", "office"]),
     # The floors above a shop: offices, as in any high street.
     "offices":    (["office", "office", "breakroom", "bathroom", "storage", "office"],
                    ["office", "office", "storage"]),
@@ -313,12 +353,26 @@ def _split(x0: int, y0: int, x1: int, y1: int, rng: random.Random,
         vertical = False
     else:
         vertical = w > h if w != h else rng.random() < 0.5
+    # Where to cut. Anywhere, for a region already near the size of a room -
+    # that is what stops every house being a grid. But a region far bigger
+    # than a room has to come down towards one on both sides of the cut, and
+    # a random cut kept shaving a sliver off a floor the size of a factory
+    # until it ran out of depth and left a room of two thousand tiles.
+    lo = (x0 if vertical else y0) + MIN_ROOM
+    hi = (x1 if vertical else y1) - MIN_ROOM
+    if area > target_area * 2.5:
+        mid = ((x0 + x1) if vertical else (y0 + y1)) // 2
+        reach = max(1, ((x1 - x0) if vertical else (y1 - y0)) // 6)
+        lo, hi = max(lo, mid - reach), min(hi, mid + reach)
+        if lo > hi:
+            lo = hi = min(max(mid, (x0 if vertical else y0) + MIN_ROOM),
+                          (x1 if vertical else y1) - MIN_ROOM)
     if vertical:
-        cut = rng.randint(x0 + MIN_ROOM, x1 - MIN_ROOM)
+        cut = rng.randint(lo, hi)
         _split(x0, y0, cut - 1, y1, rng, depth - 1, out, target_area, mask)
         _split(cut, y0, x1, y1, rng, depth - 1, out, target_area, mask)
     else:
-        cut = rng.randint(y0 + MIN_ROOM, y1 - MIN_ROOM)
+        cut = rng.randint(lo, hi)
         _split(x0, y0, x1, cut - 1, rng, depth - 1, out, target_area, mask)
         _split(x0, cut, x1, y1, rng, depth - 1, out, target_area, mask)
 
@@ -2425,11 +2479,26 @@ def _stair_foot(stairs: tuple[int, int, str] | None) -> tuple[int, int] | None:
 # church one nave, a school rooms the size of classrooms.
 KIND_ROOM_SCALE = {"industrial": 6.0, "barn": 5.0, "shed": 8.0, "church": 4.0,
                    "shop": 2.0, "school": 1.6, "civic": 1.5,
-                   "restaurant": 1.5, "medical": 1.3, "offices": 3.0}
+                   "restaurant": 1.5, "medical": 1.3, "offices": 3.0,
+                   "police": 2.0, "library": 2.5, "fire": 3.0,
+                   "military": 2.0}
 # A shop's ground floor is a sales floor or a few: rooms the size of a house's
 # cut a grocery into cupboards no rows of shelving fit in.
 SHOP_FLOOR_SCALE = 4.0
 MAX_ROOMS_PER_FLOOR = 90
+# No room bigger than this, however big the building.
+#
+# Loot is capped per room, not per container: every entry in the game's
+# Distributions.lua carries a max, which is how many containers in one room
+# may be filled from it (RoomDef.proceduralSpawnedContainer counts them), and
+# most of the household and office ones are 1, 2 or 4. So a room with twenty
+# cabinets in it has loot in the first few and nothing in the rest - "if a
+# building is too big, it just stops spawning loot in containers at some
+# point". More rooms means more allowances, so no room is bigger than this
+# whatever the building is, and the depth cap below has to be loose enough to
+# reach it: a 200x200 building needs eleven cuts, and at eight it stopped
+# with rooms of two thousand tiles.
+MAX_ROOM_AREA = 120
 
 
 def build_plan(width: int, height: int, commercial: bool = False,
@@ -2472,7 +2541,7 @@ def build_plan(width: int, height: int, commercial: bool = False,
     # hundreds of cupboards. However big the building, keep it to a number of
     # rooms a person could walk through.
     floor_tiles = sum(map(sum, mask)) if mask is not None else width * height
-    target = max(target, floor_tiles / MAX_ROOMS_PER_FLOOR)
+    target = min(max(target, floor_tiles / MAX_ROOMS_PER_FLOOR), MAX_ROOM_AREA)
 
     if kind == "apartment":
         _apartment_rooms(plan, rng, target, HOTEL_FRONTAGE if hotel else FLAT_FRONTAGE)

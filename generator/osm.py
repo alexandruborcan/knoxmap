@@ -116,11 +116,20 @@ OVERPASS_FILTERS: Sequence[str] = (
     'node["healthcare"]',
     'node["leisure"~"^(fitness_centre|sports_centre|dance|bowling_alley)$"]',
     'node["tourism"~"^(hotel|motel|hostel|guest_house|museum|gallery)$"]',
+    # Bases, armouries, barracks: mapped with military=* as often as with
+    # landuse=military, and without these an armoury was somebody's house.
+    'way["military"]',
+    'relation["military"]',
+    # Homes that were surveyed but never drawn. In whole countries, and in
+    # most American suburbs, a house is one node with its number on it and
+    # nothing else; those streets came out as roads through empty grass
+    # (generator/renderer.py _houses_from_addresses).
+    'node["addr:housenumber"]',
 )
 
 # Bumped whenever the filters above change, so a cached download made with
 # the old list is fetched again instead of silently lacking the new features.
-FILTERS_VERSION = 9
+FILTERS_VERSION = 10
 
 
 @dataclass
@@ -595,7 +604,9 @@ def classify(tags: dict) -> str | None:
         return "commercial"
     if landuse in {"industrial", "railway"}:
         return "industrial"
-    if landuse == "military":
+    # A base is as often drawn with military=* alone - airfield, barracks,
+    # range, training_area, naval_base - as with landuse=military.
+    if landuse == "military" or (tags.get("military") or "no") != "no":
         return "military"
     if landuse == "residential":
         return "residential"

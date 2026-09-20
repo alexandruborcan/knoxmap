@@ -26,14 +26,18 @@ STAGES = ("generate", "build", "compile", "install")
 # anything older is redone by that step - and by the ones after it, since each
 # works on what the one before produced.
 CHANGED_IN = {
-    # 1.1: overpasses on ramps, square bridges, monuments.
-    "generate": "1.1",
-    # 1.3.3: parking spaces in the project, petrol station pumps, car park rows.
-    "build": "1.3.3",
+    # 1.3.6: houses where the map has only an address, trees and scrub over
+    # open country, military sites read from military=* as well as landuse.
+    "generate": "1.3.6",
+    # 1.3.6: rows of shops cut into their units, rooms small enough for the
+    # game to fill every container in them, police stations, libraries and
+    # fire stations, headstones in the churchyards, a place of its own in the
+    # world so two maps can be installed at once.
+    "build": "1.3.6",
     # 1.3.1: the project is repaired before compiling.
     "compile": "1.3.1",
-    # 1.3.4: objects.lua (the cars) and worldmap.xml.bin (the in-game map).
-    "install": "1.3.4",
+    # 1.3.6: the old map's cells are cleared out before the new ones go in.
+    "install": "1.3.6",
 }
 # What each step is called in the window, for the message.
 LABELS = {"generate": "Generate map", "build": "Build", "compile": "Compile",

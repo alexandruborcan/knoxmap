@@ -12,6 +12,7 @@
 # after a KnoxMap update to pick up anything new.
 
 0.5 m per tile (small areas) = 0.5 m per tile (small areas)
+1 lays every road in straight runs along the tiles and on 45-degree diagonals, and stands every building upright beside them, like the game’s own map. 0 draws roads as they are. = 1 lays every road in straight runs along the tiles and on 45-degree diagonals, and stands every building upright beside them, like the game’s own map. 0 draws roads as they are.
 1 m per tile (recommended) = 1 m per tile (recommended)
 1 turns the map so the main street grid runs along the tiles - no staircase roads. 0 keeps north up. = 1 turns the map so the main street grid runs along the tiles - no staircase roads. 0 keeps north up.
 1. Area = 1. Area
@@ -56,6 +57,7 @@ Could not open that map = Could not open that map
 Could not restart = Could not restart
 Could not save that file = Could not save that file
 Dark = Dark
+Degrees to turn the whole area before it is built, on top of Straighten streets. Use it when the automatic angle picks the wrong grid. = Degrees to turn the whole area before it is built, on top of Straighten streets. Use it when the automatic angle picks the wrong grid.
 Dismiss = Dismiss
 Download everything (.zip) = Download everything (.zip)
 Downloading map data = Downloading map data
@@ -158,11 +160,13 @@ Tallest building = Tallest building
 Target room area in tiles before it gets split. = Target room area in tiles before it gets split.
 Terrain generated = Terrain generated
 The KnoxMap version you are running. Click to choose another = The KnoxMap version you are running. Click to choose another
+The window's language. Copy lang/english.txt, translate it and name it after your language = The window's language. Copy lang/english.txt, translate it and name it after your language
 Then = Then
 This copy of KnoxMap is a git checkout: switch versions with git. = This copy of KnoxMap is a git checkout: switch versions with git.
 toast bad problem = toast bad problem
 Town = Town
 Try again = Try again
+Turn the map = Turn the map
 Turns every OSM footprint into a furnished building. = Turns every OSM footprint into a furnished building.
 Turns the map into the game's files with WorldEd. Takes a few minutes. = Turns the map into the game's files with WorldEd. Takes a few minutes.
 Vegetation BMP = Vegetation BMP

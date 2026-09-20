@@ -98,6 +98,26 @@ def town() -> list[OSMFeature]:
                     feats.append(way({"building": "house"},
                                      box(x0 + k * 20, y0, x0 + k * 20 + 12, y0 + 10)))
     feats.append(way({"leisure": "park", "name": "Selftest Park"}, box(410, 410, 470, 470)))
+    # A churchyard beside the church, an army base, a parade of shops, a police
+    # station and a library - the land uses and buildings 1.3.6 added.
+    feats.append(way({"landuse": "cemetery", "name": "Selftest Cemetery"},
+                     box(250, 410, 330, 470)))
+    feats.append(way({"landuse": "military", "name": "Selftest Camp"},
+                     box(100, 410, 200, 480)))
+    feats.append(way({"military": "barracks", "building": "yes", "name": "Selftest Barracks"},
+                     box(120, 430, 150, 450)))
+    feats.append(way({"building": "retail", "name": "Selftest Parade"},
+                     box(170, 92, 290, 114)))
+    feats.append(way({"building": "yes", "amenity": "police", "name": "Selftest Police"},
+                     box(330, 250, 366, 278)))
+    feats.append(way({"building": "yes", "amenity": "library", "name": "Selftest Library"},
+                     box(330, 200, 360, 226)))
+    # A street where the homes were never drawn - only their numbers.
+    for k in range(8):
+        feats.append(OSMFeature(next(_ids), "node",
+                                {"addr:housenumber": str(k * 2 + 1),
+                                 "addr:street": "Avenue 6"},
+                                [_ll(120 + k * 14, 500)]))
     # A river with a bridge carrying High Street over it.
     feats.append(way({"waterway": "river", "name": "Selftest River"}, [(560, 30), (560, 600)]))
     feats.append(way({"natural": "water", "water": "river"}, box(550, 0, 572, 600)))
@@ -143,6 +163,94 @@ class Checks:
         print(("  ok    " if ok else "  FAIL  ") + what)
         if not ok:
             self.failed += 1
+
+
+def check_1_3_6(check, out: str, tbx: list[str], pzw_text: str, log: str) -> None:
+    """What 1.3.6 added: rows cut into units, rooms the game can fill, police
+    stations and libraries, graves, army bases, and a place in the world of
+    this map's own."""
+    from knoxbuild import layout
+    from knoxbuild.world import WORLD_ORIGIN_CELLS, choose_origin
+
+    texts = {os.path.basename(p): open(p, encoding="utf-8").read() for p in tbx}
+
+    # The 120 m parade of shops is several buildings, not one shed.
+    units = [n for n in texts if re.fullmatch(r"selftest_\d+_\d+\.tbx", n)]
+    check(len(units) >= 4, f"a row of shops is cut into its units ({len(units)})")
+
+    # Every room small enough that the game fills every container in it. The
+    # game caps filled containers per room, so one room the size of a factory
+    # floor has loot at one end and bare shelves at the other.
+    from knoxbuild.settings import Settings as _S
+    biggest = 0
+    for kind, w, h in (("industrial", 140, 110), ("civic", 200, 200),
+                       ("apartment", 60, 40), (None, 30, 24)):
+        plan = layout.build_building(w, h, commercial=True, seed=3, kind=kind,
+                                     levels=1, settings=_S()).storeys[0]
+        # Bar the landing of a block of flats, which is a corridor by
+        # design and holds nothing worth filling.
+        biggest = max(biggest, max((r.x1 - r.x0 + 1) * (r.y1 - r.y0 + 1)
+                                   for r in plan.rooms if not r.is_core))
+    check(0 < biggest <= layout.MAX_ROOM_AREA,
+          f"no room is bigger than the game will fill ({biggest} tiles)")
+
+    rooms = {m for t in texts.values() for m in re.findall(r'InternalName="(\w+)"', t)}
+    check("policeoffice" in rooms and "policelocker" in rooms,
+          "the police station is a police station inside")
+    check("library" in rooms, "the library has reading rooms")
+    check("armystorage" in rooms, "the barracks holds army stores")
+
+    props = [n for n in texts if n.startswith("selftest_props_")]
+    graves = sum(t.count("location_community_cemetary_01_") for n, t in texts.items()
+                 if n.startswith("selftest_props_"))
+    stores = sum(t.count("location_military_generic_01_") for n, t in texts.items()
+                 if n.startswith("selftest_props_"))
+    check(props and graves >= 20 and any("selftest_props_" in line
+                                         for line in pzw_text.splitlines()),
+          f"the churchyard has headstones in it ({graves})")
+    check(stores >= 2, f"the army base has stores on it ({stores})")
+
+    # The base is fenced whether or not anyone drew the fence.
+    wire = sum(t.count("fencing_01_059") + t.count("fencing_01_056")
+               for n, t in texts.items() if "_fences_" in n)
+    check(wire >= 20, f"the army base is fenced off ({wire} tiles of wire)")
+
+    # Homes that the map only had an address for.
+    geo = json.load(open(os.path.join(out, "selftest_buildings.geojson"), encoding="utf-8"))
+    addressed = [f for f in geo["features"]
+                 if (f.get("properties") or {}).get("addr:street") == "Avenue 6"]
+    check(len(addressed) >= 6,
+          f"a street of addresses with no buildings gets houses ({len(addressed)})")
+
+    # Trees and scrub on ground nobody mapped, and none on the farmland.
+    from generator import pz_colors as _C
+    from generator import renderer as _r
+
+    class _P:
+        meters_per_tile = 1.0
+    land = Image.new("RGB", (400, 300), _C.DARK_GRASS)
+    pen = land.load()
+    for x in range(200, 400):
+        for y in range(300):
+            pen[x, y] = _C.LIGHT_GRASS          # a field
+    veg = Image.new("RGB", (400, 300), _C.VEG_NOTHING)
+    grown = _r._paint_wild_growth(veg, land, _P(), density=1.0)
+    grid = veg.load()
+    field = sum(1 for x in range(210, 390) for y in range(10, 290)
+                if grid[x, y] != _C.VEG_NOTHING)
+    check(grown >= 30 and field == 0,
+          f"open country grows trees and scrub, farmland stays a field ({grown})")
+
+    # The first map on a PC keeps the old origin; the next one stands clear.
+    origin = re.search(r'<worldOrigin origin="(\d+),(\d+)"', pzw_text)
+    check(origin and (int(origin.group(1)), int(origin.group(2))) == WORLD_ORIGIN_CELLS,
+          "the first map is built where every map used to be")
+    beside = os.path.join(os.path.dirname(out), "elsewhere")
+    os.makedirs(beside, exist_ok=True)
+    picked = choose_origin(beside, 3, 3)
+    check(picked[0] >= WORLD_ORIGIN_CELLS[0] + 3,
+          f"a second map is built clear of the first (cell {picked[0]},{picked[1]})")
+    shutil.rmtree(beside, ignore_errors=True)
 
 
 def check_repair(check, out: str) -> None:
@@ -262,22 +370,27 @@ def check_mapstate(check, out: str) -> None:
     check(mapstate.needs(out) == [] and mapstate.made_with(out) == knoxlog.version(),
           "a map this KnoxMap made needs nothing redone")
 
-    # One made before the cars and the pumps: build again, and everything
-    # after it - but not the terrain, which has not changed since.
-    state = {"stages": {"generate": {"version": "1.3.2"}, "build": {"version": "1.3.2"},
-                        "compile": {"version": "1.3.2"}, "install": {"version": "1.3.2"}}}
-    with open(os.path.join(out, mapstate.STATE_FILE), "w", encoding="utf-8") as f:
-        json.dump(state, f)
-    check(mapstate.needs(out) == ["build", "compile", "install"]
-          and mapstate.made_with(out) == "1.3.2",
-          "a map from before the cars is built, compiled and installed again")
+    def with_stages(versions: dict) -> list[str]:
+        state = {"stages": {k: {"version": v} for k, v in versions.items()}}
+        with open(os.path.join(out, mapstate.STATE_FILE), "w", encoding="utf-8") as f:
+            json.dump(state, f)
+        return mapstate.needs(out)
 
-    # One from just before the in-game map fix: install alone.
-    state["stages"] = {k: {"version": "1.3.3"} for k in mapstate.STAGES}
-    with open(os.path.join(out, mapstate.STATE_FILE), "w", encoding="utf-8") as f:
-        json.dump(state, f)
-    check(mapstate.needs(out) == ["install"],
-          "a map from before the in-game map fix is only installed again")
+    # A map older than every step: all four, in order.
+    old = {k: "1.0" for k in mapstate.STAGES}
+    check(with_stages(old) == list(mapstate.STAGES) and mapstate.made_with(out) == "1.0",
+          "a map older than everything is redone from the start")
+
+    # One whose terrain is current but whose buildings are not: build again,
+    # and everything after it - but not the terrain.
+    current = {k: knoxlog.version() for k in mapstate.STAGES}
+    check(with_stages({**current, "build": "1.0", "compile": "1.0", "install": "1.0"})
+          == ["build", "compile", "install"],
+          "a map with older buildings is built, compiled and installed again")
+
+    # And one that only has to go in again.
+    check(with_stages({**current, "install": "1.0"}) == ["install"],
+          "a map that only needs installing again is only installed again")
 
     # A step redone makes what came after it stale.
     mapstate.stamp(out, "build")
@@ -515,6 +628,7 @@ def main(argv: list[str]) -> int:
         stalls = len(re.findall(r'group="ParkingStall"', pzw_text))
         check(stalls >= 40, f"car parks and drives have parking stalls ({stalls})")
         check(len(school) >= 1, "the school has classrooms")
+        check_1_3_6(check, out, tbx, pzw_text, log.getvalue())
         texts = [open(p, encoding="utf-8").read() for p in tbx]
         windows = {m for t in texts for m in re.findall(r'category="windows">\s*<tile enum="West" tile="(\w+)"', t)}
         check(len(windows) >= 3, f"window styles vary ({len(windows)})")
@@ -527,7 +641,7 @@ def main(argv: list[str]) -> int:
             west = re.search(r'enum="West" tile="(\w+)"', blocks[ext - 1])
             gap = re.search(r'enum="CapGapE3" tile="(\w+)"', blocks[cap - 1])
             return bool(west and gap and west.group(1) == gap.group(1))
-        houses_tbx = [t for p, t in zip(tbx, texts) if not any(k in p for k in ("_fences_", "_structures_", "_pumps_"))]
+        houses_tbx = [t for p, t in zip(tbx, texts) if not any(k in p for k in ("_fences_", "_structures_", "_pumps_", "_props_"))]
         check(all(gaps_match(t) for t in houses_tbx), "flat roofs wall in the top floor with its own material")
         check(any("_fences_" in p for p in tbx), "back yards are fenced")
         yard = Image.open(os.path.join(out, "selftest.bmp")).convert("RGB")

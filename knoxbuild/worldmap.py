@@ -34,7 +34,7 @@ from generator import osm
 from generator.renderer import (THROUGH_ROADS, _is_polygon, _way_width_m,
                                 sea_polygons, shape_px)
 
-from .world import WORLD_ORIGIN_CELLS
+from .world import origin
 
 CELL = 300
 
@@ -205,7 +205,7 @@ def _lua_string(text: str) -> str:
 def _write_annotations(path: str, labels: list[tuple[str, str, float, float, float]],
                        width: int, height: int) -> None:
     """Text on the paper map, the way vanilla's worldmap-annotations.lua adds it."""
-    ox, oy = WORLD_ORIGIN_CELLS[0] * CELL, WORLD_ORIGIN_CELLS[1] * CELL
+    ox, oy = origin()[0] * CELL, origin()[1] * CELL
     seen = set()
     lines = ["return function(mapUI)",
              "\tlocal mapAPI = mapUI.javaObject:getAPIv3()",
@@ -266,7 +266,7 @@ def _parts(geom) -> list[Polygon]:
 def _write_worldmap(path: str, features: list[tuple[Polygon, str, str]],
                     width: int, height: int) -> int:
     """Clip every feature to the cells it crosses, in cell coordinates."""
-    ox, oy = WORLD_ORIGIN_CELLS
+    ox, oy = origin()
     by_cell: dict[tuple[int, int], list[str]] = {}
     for poly, key, value in features:
         minx, miny, maxx, maxy = poly.bounds
@@ -299,7 +299,7 @@ def _write_worldmap(path: str, features: list[tuple[Polygon, str, str]],
 
 def _write_streets(path: str, streets: dict[str, list[tuple[LineString, float]]]) -> int:
     """One entry per continuous stretch of each named street."""
-    ox, oy = WORLD_ORIGIN_CELLS[0] * CELL, WORLD_ORIGIN_CELLS[1] * CELL
+    ox, oy = origin()[0] * CELL, origin()[1] * CELL
     count = 0
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write('<streets version="1">\n')

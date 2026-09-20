@@ -109,6 +109,54 @@ class Footprint:
         return self.mask.tolist()
 
 
+# A unit narrower than this is not a building anyone can walk into: three
+# tiles of room plus its walls.
+MIN_ROOM_SIDE = 5
+
+
+def split_row(fp: "Footprint", unit_tiles: int,
+              min_tiles: int = MIN_TILES) -> list["Footprint"]:
+    """Cut a long footprint into one footprint per unit along its length.
+
+    A row of shops or a terrace of houses is usually one polygon in
+    OpenStreetMap - the mapper drew the block, not the seven doors in it - and
+    built as one building it came out as a single cavernous shed with one
+    front door, the "uber building" players kept reporting. Cut into units of
+    about a shop's frontage it becomes what it is: separate buildings standing
+    wall to wall, which is a case the rest of the build already handles (the
+    shared walls lose their windows, see _party_walls).
+
+    The cuts are made on tile boundaries with no gap between units, so the row
+    still covers exactly the tiles the real building covers.
+    """
+    along_x = fp.width >= fp.height
+    length = fp.width if along_x else fp.height
+    units = max(1, int(round(length / max(1, unit_tiles))))
+    if units < 2:
+        return [fp]
+    out: list[Footprint] = []
+    edges = [round(length * k / units) for k in range(units + 1)]
+    for a, b in zip(edges, edges[1:]):
+        if b - a < MIN_ROOM_SIDE:
+            continue
+        part = fp.mask[:, a:b] if along_x else fp.mask[a:b, :]
+        if part.sum() < min_tiles:
+            continue
+        part = _largest_component(part)
+        rows = np.where(part.any(axis=1))[0]
+        cols = np.where(part.any(axis=0))[0]
+        if len(rows) == 0 or len(cols) == 0:
+            continue
+        part = part[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
+        if part.sum() < min_tiles:
+            continue
+        x0 = fp.x0 + (a if along_x else 0) + int(cols[0])
+        y0 = fp.y0 + (0 if along_x else a) + int(rows[0])
+        out.append(Footprint(x0, y0, part, fp.angle,
+                             fp.short_side, fp.long_side / units))
+    return out or [fp]
+
+
 NUDGE_TILES = 5
 
 

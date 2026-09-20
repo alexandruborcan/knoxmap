@@ -743,7 +743,11 @@ def main(argv: list[str]) -> int:
              "mechanic", "motelroom", "bakery", "gasstore", "giftstore", "toystore",
              "candystore", "butcher", "departmentstore", "jewelrystore", "camerastore",
              "musicstore", "movierental", "gunstore", "sportstore", "gardenstore",
-             "furniturestore", "armystorage"]
+             "furniturestore", "armystorage",
+             # A police station, a fire station: the game has rooms for both.
+             "policehall", "policelocker", "policeoutfitstorage", "policestorage",
+             "policegunstorage", "policearchive", "interrogationroom", "cells",
+             "firegarage", "firestorage"]
     missing = [k for k in KINDS if k not in room_colors]
     if missing:
         raise SystemExit(f"ERROR: room names absent from RoomNames.txt: {missing}")

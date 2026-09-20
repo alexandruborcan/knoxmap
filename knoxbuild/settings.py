@@ -35,6 +35,13 @@ class Settings:
     # (1) or keep north straight up (0). Diagonal streets become staircases of
     # tiles; turning the map straightens every street on the grid.
     align_streets: int = 1
+    # Turn the map by hand, on top of whatever straightening did. A city
+    # whose streets run at 30 degrees has every road as a staircase; turned
+    # 30 degrees it is laid out along the tiles. Straighten streets finds the
+    # angle itself where there is one grid to find; this is for the places
+    # where the automatic answer is wrong, or where there are two grids and
+    # the mapper wants to pick which one wins.
+    rotate_degrees: float = 0.0
     # Lay every road in straight runs along the tiles and on the 45-degree
     # diagonal, like Knox County's (1), and stand every building upright on
     # the grid, clear of the roads; or draw them as mapped (0).
@@ -111,6 +118,8 @@ LIMITS = {
     # plus its walls. MAX_BUILDING_DIMENSION in the reader is 300.
     "min_size": (3, 40),
     "align_streets": (0, 1),
+    # Past 45 either way it is the same grid again, a quarter turn round.
+    "rotate_degrees": (-45.0, 45.0),
     "straight_roads": (0, 1),
     "max_size": (8, 250),
     "apartment_footprint": (16, 4000),
