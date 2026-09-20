@@ -26,6 +26,42 @@ sys.path.insert(0, str(BASE_DIR))
 
 import knoxlog  # noqa: E402
 import knoxpaths  # noqa: E402
+import knoxstop  # noqa: E402
+
+
+BATCH_TIMEOUT = 2 * 3600
+# How often a running batch is asked whether the window wants it stopped.
+STOP_POLL_SECONDS = 1.0
+
+
+def _run_batch(cmd, should_stop, started: float):
+    """Run one WorldEd batch, watching for a stop while it works.
+
+    subprocess.run waits for the process and nothing else, so a compile could
+    only be stopped between batches - and one batch of a big map is minutes.
+    This waits in short steps instead, and when the window asks it to stop it
+    closes WorldEd down and raises.
+    """
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, encoding="utf-8", errors="replace")
+    while True:
+        try:
+            out, err = proc.communicate(timeout=STOP_POLL_SECONDS)
+            return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+        except subprocess.TimeoutExpired:
+            pass
+        if should_stop is not None and should_stop():
+            proc.terminate()
+            try:
+                proc.communicate(timeout=20)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+            raise knoxstop.Stopped("the compile")
+        if time.time() - started > BATCH_TIMEOUT:
+            proc.kill()
+            proc.communicate()
+            raise subprocess.TimeoutExpired(cmd, BATCH_TIMEOUT)
 
 DEFAULT_EXE = knoxpaths.worlded_cli() or Path("PZWorldEd_cli.exe")
 
@@ -121,7 +157,7 @@ def clear_stale(project: Path) -> None:
 
 
 def compile_map(project_dir: str, batch: int = 4, exe: str | None = None,
-                on_progress=None) -> int:
+                on_progress=None, should_stop=None) -> int:
     """Run every batch. Returns the number of compiled cells."""
     project = Path(project_dir).resolve()
     pzw = project / f"{project.name}.pzw"
@@ -161,8 +197,8 @@ def compile_map(project_dir: str, batch: int = 4, exe: str | None = None,
         cmd = knoxpaths.command_for(exe_path) + [f"--generate-map={pzw}",
                f"--cells={bx},{by},{x1},{y1}"]
         batch_started = time.time()
-        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=2 * 3600)
+        knoxstop.check(should_stop, "the compile")
+        proc = _run_batch(cmd, should_stop, batch_started)
         # WorldEd's own account of the batch, kept whatever happened: when it
         # crashes this is the only record of how far it got.
         saved = knoxlog.save_tool_output("PZWorldEd_cli", project.name,

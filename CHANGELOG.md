@@ -47,6 +47,15 @@ lands the same way on a town in Kentucky, in Australia or in Turkey.
 - Installing clears the old map out of the mod folder first. A map rebuilt
   smaller used to ship its old cells alongside the new ones.
 
+- **Stop**, on all three long steps. Generating, building and compiling take
+  minutes, and the only way out of one was to close the window - which threw
+  the drawn rectangle away with it. The button drops the job at the first
+  place it can be dropped cleanly (between Overpass tiles, between buildings,
+  inside a compile batch, which closes WorldEd down rather than waiting it
+  out). The area, the settings and everything already made stay exactly as
+  they were: press the step again and it starts over, and a stopped compile
+  carries on from the cells it had finished.
+
 Reported in #report-the-bugs:
 
 - **The question marks on the pavement.** The litter rule named

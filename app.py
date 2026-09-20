@@ -24,6 +24,7 @@ from flask import (Flask, jsonify, render_template, request, send_file,
                    send_from_directory)
 
 import knoxlog
+import knoxstop
 from generator import osm, places, renderer
 from knoxbuild import mapstate
 from knoxbuild.settings import PRESETS, Settings
@@ -98,6 +99,8 @@ def _log_refusals(response):
     if (request.path.startswith("/api/") and response.status_code >= 400
             and response.is_json):
         data = response.get_json(silent=True) or {}
+        if data.get("stopped"):
+            return response          # asked for; already in the log as a stop
         if not data.get("errorId"):
             eid = knoxlog.record(None, f"{request.method} {request.path} -> "
                                        f"{response.status_code}: {data.get('error')}",
@@ -297,6 +300,52 @@ _PROGRESS_LOCK = threading.Lock()
 def _set_progress(map_name: str, **fields) -> None:
     with _PROGRESS_LOCK:
         _PROGRESS.setdefault(map_name, {}).update(fields)
+
+
+# Maps the window has asked to stop. A long job looks at this between the
+# pieces of work it can be interrupted between (knoxstop.py); the name comes
+# off the list when the job it stopped notices, so the next run is not
+# stopped before it starts.
+_STOPPING: set[str] = set()
+
+
+def _stopper(map_name: str):
+    """A callable the long jobs poll: True once the window has asked."""
+    return lambda: map_name in _STOPPING
+
+
+def _done_stopping(map_name: str) -> None:
+    _STOPPING.discard(map_name)
+
+
+def _stopped(map_name: str, step: str):
+    """The reply for a job the window stopped: not an error, and the map's
+    area and settings are untouched."""
+    _done_stopping(map_name)
+    log.info("stop %s: %s stopped", map_name, step)
+    with _PROGRESS_LOCK:
+        _PROGRESS.setdefault(map_name, {})["stage"] = "stopped"
+    return jsonify({"stopped": True, "step": step, "mapName": map_name}), 409
+
+
+@app.route("/api/stop", methods=["POST"])
+def api_stop():
+    """Stop making this map, and leave everything else as it is.
+
+    The drawn area, the settings and whatever has already been written stay
+    where they are: pressing the button again starts the same map over. Used
+    to mean closing the window, which threw the drawn rectangle away with it.
+    """
+    name = str((_json_body() or {}).get("mapName", "")).strip()
+    if not name:
+        return failed("Which map?", 400)
+    _STOPPING.add(name)
+    log.info("stop %s: asked by the window", name)
+    with _PROGRESS_LOCK:
+        _PROGRESS.setdefault(name, {})["stage"] = "stopping"
+        if _COMPILE.get(name, {}).get("state") == "running":
+            _COMPILE[name] = {**_COMPILE[name], "state": "stopping"}
+    return jsonify({"stopping": True, "mapName": name})
 
 
 @app.route("/api/progress")
@@ -703,7 +752,10 @@ def generate():
             # tile it is the same single request, and it brings the retry that
             # quarters a bbox the servers call too heavy.
             features = osm.fetch_features_tiled(
-                *fetch_box, max_tile_km2=OVERPASS_TILE_KM2, progress=_progress)
+                *fetch_box, max_tile_km2=OVERPASS_TILE_KM2, progress=_progress,
+                should_stop=_stopper(map_name))
+        except knoxstop.Stopped:
+            return _stopped(map_name, "generate")
         except Exception as exc:  # Overpass can be flaky — surface that clearly
             _set_progress(map_name, stage="error", message=str(exc))
             return failed(f"OSM query failed: {exc}", 502, exc)
@@ -725,19 +777,23 @@ def generate():
     osm_time = time.time() - t0
     _set_progress(map_name, stage="render", features=len(features))
 
-    result = renderer.render(
-        features, south, west, north, east,
-        meters_per_tile=meters_per_tile,
-        output_dir=str(map_dir),
-        map_name=map_name,
-        spawn_density=settings.spawn_density,
-        tree_density=settings.tree_density,
-        rotation=rotation,
-        osm_cache=osm_cache_name,
-        osm_bbox=osm_bbox,
-        shape=shape,
-        straight_roads=bool(settings.straight_roads),
-    )
+    try:
+        result = renderer.render(
+            features, south, west, north, east,
+            meters_per_tile=meters_per_tile,
+            output_dir=str(map_dir),
+            map_name=map_name,
+            spawn_density=settings.spawn_density,
+            tree_density=settings.tree_density,
+            rotation=rotation,
+            osm_cache=osm_cache_name,
+            osm_bbox=osm_bbox,
+            shape=shape,
+            straight_roads=bool(settings.straight_roads),
+            should_stop=_stopper(map_name),
+        )
+    except knoxstop.Stopped:
+        return _stopped(map_name, "generate")
 
     _write_readme(map_dir, map_name, result)
     _set_progress(map_name, stage="done")
@@ -878,7 +934,10 @@ def api_buildings():
     try:
         from contextlib import redirect_stdout
         with redirect_stdout(out):
-            build_buildings(str(map_dir), settings=settings)
+            build_buildings(str(map_dir), settings=settings,
+                            should_stop=_stopper(map_dir.name))
+    except knoxstop.Stopped:
+        return _stopped(map_dir.name, "buildings")
     except Exception as exc:
         log.info("buildings %s output before the error:\n%s", map_dir.name,
                  out.getvalue()[-4000:])
@@ -1184,7 +1243,8 @@ def api_compile():
         t0 = time.time()
         try:
             produced = compiler.compile_map(str(map_dir), batch=COMPILE_BATCH,
-                                            exe=str(exe), on_progress=note)
+                                            exe=str(exe), on_progress=note,
+                                            should_stop=_stopper(name))
             if not produced:
                 eid = knoxlog.record(None, f"compile {name}: produced no cells")
                 with _PROGRESS_LOCK:
@@ -1195,6 +1255,12 @@ def api_compile():
             with _PROGRESS_LOCK:
                 mapstate.stamp(str(map_dir), "compile")
                 _COMPILE[name] = {"state": "done", "error": None}
+        except knoxstop.Stopped:
+            log.info("compile %s: stopped after %.0fs", name, time.time() - t0)
+            _done_stopping(name)
+            with _PROGRESS_LOCK:
+                _COMPILE[name] = {"state": "stopped", "error": None}
+            return
         except subprocess.TimeoutExpired as exc:
             eid = knoxlog.record(exc, f"compile {name}: timed out")
             with _PROGRESS_LOCK:

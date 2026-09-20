@@ -24,6 +24,8 @@ from shapely.geometry import Polygon
 
 from generator.renderer import Projector
 
+import knoxstop
+
 from .areas import AreaIndex
 from .fences import build_fences
 from .footprint import place
@@ -738,7 +740,8 @@ def _make_all(jobs: list[tuple]) -> list[tuple[int, int, int]]:
 
 
 def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
-          max_size: int | None = None, settings: Settings | None = None) -> int:
+          max_size: int | None = None, settings: Settings | None = None,
+          should_stop=None) -> int:
     """Generate every building for a rendered map.
 
     The explicit seed/min_size/max_size arguments are kept so the command line
@@ -864,7 +867,11 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     metres_per_tile = info["meters_per_tile"]
     context = Context(proj.width, proj.height, surroundings, metres_per_tile)
 
-    for _neg_area, i, px in order:
+    for placed_so_far, (_neg_area, i, px) in enumerate(order):
+        # Between buildings: nothing is written to disk until the whole run
+        # is laid out, so stopping here costs only the time spent.
+        if placed_so_far % 64 == 0:
+            knoxstop.check(should_stop, "the buildings")
         feat = geo["features"][i]
         fp, reason = place(px, occupied, min_side=min_size, max_side=max_size,
                            snap_degrees=45 if straight else settings.square_buildings,
@@ -1029,6 +1036,7 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
             "angle": round(fp.angle, 1),
         })
     rows.sort(key=lambda r: r["file"])
+    knoxstop.check(should_stop, "the buildings")
     from .yards import paint_paths
     drives: list = []
     paths, yard_fences = paint_paths(out_dir, map_name, rows, occupied, drives)

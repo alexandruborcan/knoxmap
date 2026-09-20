@@ -21,6 +21,8 @@ from typing import Iterable
 import pyproj
 from PIL import Image, ImageDraw, ImageFilter
 
+import knoxstop
+
 from . import pz_colors as C
 from . import structures
 from .osm import FENCE_BARRIERS, OSMFeature, classify
@@ -552,7 +554,8 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
            osm_cache: str | None = None,
            osm_bbox: tuple[float, float, float, float] | None = None,
            shape: dict | None = None,
-           straight_roads: bool = False) -> RenderResult:
+           straight_roads: bool = False,
+           should_stop=None) -> RenderResult:
     proj = Projector.build(south, west, north, east, meters_per_tile, rotation)
     # Read more than once below - the buildings pass goes back over the
     # address points - so never leave this as a generator.
@@ -690,6 +693,7 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
         _clip_to_shape(landscape, clip, buckets, proj)
     _weather_roads(landscape, proj)
 
+    knoxstop.check(should_stop, "the terrain")
     _paint_vegetation(vegetation, landscape, vegetation_feats, proj,
                       density=tree_density)
     _paint_gardens(vegetation, landscape, building_feats, proj, density=tree_density)

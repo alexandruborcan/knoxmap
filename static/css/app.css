@@ -137,6 +137,14 @@ input[readonly] { background: var(--bg); color: var(--muted); }
   font-size: 18px; color: var(--faint); cursor: pointer;
 }
 
+.btn-stop {
+  border-color: #8a3b3b;
+  color: #ffb4b4;
+  background: #2a1414;
+}
+.btn-stop:hover:not(:disabled) { background: #3a1a1a; }
+#gen-overlay .btn-stop { margin-top: 10px; }
+
 #gen-overlay {
   position: absolute; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center;
   background: rgba(10,12,9,.6);

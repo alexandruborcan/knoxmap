@@ -636,6 +636,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
   fx.step('style', 'done');
   fx.step('terrain', 'running');
   fx.overlay.show();
+  showStop(chosen);
   startProgress(chosen);
 
   try {
@@ -645,6 +646,14 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
       body: JSON.stringify(body),
     });
     const data = await res.json();
+    if (wasStopped(data, res)) {
+      status.className = '';
+      status.textContent = 'Stopped. The area is still drawn - press Generate map to start again.';
+      fx.overlay.hide();
+      fx.step('terrain', '');
+      fx.toast('ok', 'Stopped', 'The area and the settings are as you left them.');
+      return;
+    }
     if (!res.ok) throw apiError(data, res);
 
     status.className = 'success';
@@ -663,9 +672,58 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
     fx.problem('Generation failed', err.message, err.errorId);
   } finally {
     stopProgress();
+    showStop(null);
     btn.disabled = false;
   }
 });
+
+// ---- stopping a long step ----
+//
+// Generating, building and compiling take minutes, and the only way out of
+// one used to be closing the window - which threw the drawn rectangle away
+// with it. The Stop button asks the server to drop the job where it can be
+// dropped safely; nothing here touches the selection, the settings or the
+// map name, so pressing the step again starts the same map over.
+
+let stoppingMap = null;
+
+function showStop(mapName) {
+  stoppingMap = null;
+  document.querySelectorAll('[data-stop]').forEach(b => {
+    b.hidden = !mapName;
+    b.disabled = false;
+    b.textContent = 'Stop';
+  });
+  runningMap = mapName;
+}
+
+let runningMap = null;
+
+async function requestStop() {
+  if (!runningMap || stoppingMap === runningMap) return;
+  stoppingMap = runningMap;
+  document.querySelectorAll('[data-stop]').forEach(b => {
+    b.disabled = true;
+    b.textContent = 'Stopping…';
+  });
+  try {
+    await fetch('/api/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mapName: runningMap }),
+    });
+  } catch (_) { /* the step's own reply is the source of truth */ }
+}
+
+document.addEventListener('click', ev => {
+  if (ev.target.closest('[data-stop]')) requestStop();
+});
+
+// A reply the server sends when a step was stopped on purpose. Not an error:
+// no red, no problem report, and the area stays drawn.
+function wasStopped(data, res) {
+  return res.status === 409 && data && data.stopped;
+}
 
 // ---- progress for long generations ----
 //
@@ -1036,6 +1094,7 @@ document.getElementById('buildingsBtn').addEventListener('click', async () => {
   const btn = document.getElementById('buildingsBtn');
   btn.disabled = true;
   note('buildingsNote', 'Generating…');
+  showStop(currentMap);
   try {
     const res = await fetch('/api/buildings', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1044,6 +1103,11 @@ document.getElementById('buildingsBtn').addEventListener('click', async () => {
       body: JSON.stringify({ mapName: currentMap, settings: readSettings() }),
     });
     const data = await res.json();
+    if (wasStopped(data, res)) {
+      note('buildingsNote', 'Stopped. The terrain and the area are still here — press Build again.');
+      fx.toast('ok', 'Stopped', 'Nothing was thrown away.');
+      return;
+    }
     if (!res.ok) throw apiError(data, res);
     note('buildingsNote', `${data.count} buildings → ${data.pzw}`, 'ok');
     renderCensus(data.population);
@@ -1053,6 +1117,7 @@ document.getElementById('buildingsBtn').addEventListener('click', async () => {
   } catch (err) {
     note('buildingsNote', err.message, 'bad');
   } finally {
+    showStop(null);
     btn.disabled = false;
   }
 });
@@ -1194,6 +1259,7 @@ document.getElementById('compileBtn').addEventListener('click', async () => {
   const btn = document.getElementById('compileBtn');
   btn.disabled = true;
   note('compileNote', 'Starting…');
+  showStop(currentMap);
   try {
     const res = await fetch('/api/compile', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1204,6 +1270,7 @@ document.getElementById('compileBtn').addEventListener('click', async () => {
     pollCompile();
   } catch (err) {
     note('compileNote', err.message, 'bad');
+    showStop(null);
     btn.disabled = false;
   }
 });
@@ -1219,6 +1286,10 @@ function pollCompile() {
       const res = await fetch(
         `/api/compile-status?map=${encodeURIComponent(currentMap)}`);
       const p = await res.json();
+      if (p.state === 'stopping') {
+        note('compileNote', 'Stopping — waiting for WorldEd to close…');
+        return;
+      }
       if (p.state === 'running') {
         const pct = p.expected ? Math.floor(100 * p.cells / p.expected) : 0;
         // The batch counter is the honest one on a big map: cell files land in
@@ -1232,7 +1303,15 @@ function pollCompile() {
         return;
       }
       clearInterval(compileTimer);
+      showStop(null);
       document.getElementById('compileBtn').disabled = false;
+      if (p.state === 'stopped') {
+        fx.progress('compile', 0);
+        note('compileNote', 'Stopped. The cells already compiled are kept — '
+                            + 'press Compile to carry on from there.');
+        fx.toast('ok', 'Stopped', 'Compiling picks up where it left off.');
+        return;
+      }
       if (p.state === 'error') {
         lastErrorId = p.errorId || null;
         note('compileNote', p.error || 'Compile failed.', 'bad');

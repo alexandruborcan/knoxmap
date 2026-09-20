@@ -67,6 +67,7 @@
         <div id="gen-detail"></div>
         <div class="bar"><div id="gen-bar" class="bar-fill"></div></div>
         <div class="gen-elapsed"><span id="gen-clock">0:00</span></div>
+        <button id="stopOverlayBtn" class="btn btn-small btn-stop" data-stop>Stop</button>
       </div>
     </div>
   </section>
@@ -205,6 +206,7 @@
         </div>
       </div>
       <button id="buildingsBtn" class="btn">Build</button>
+      <button class="btn btn-small btn-stop" data-stop hidden>Stop</button>
     </li>
     <li class="pipe-card" data-step="compile">
       <div class="pipe-body">
@@ -221,6 +223,7 @@
         </details>
       </div>
       <button id="compileBtn" class="btn" disabled>Compile</button>
+      <button class="btn btn-small btn-stop" data-stop hidden>Stop</button>
     </li>
     <li class="pipe-card" data-step="install">
       <div class="pipe-body">

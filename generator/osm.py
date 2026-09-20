@@ -19,6 +19,8 @@ from typing import Iterable, Sequence
 
 import requests
 
+import knoxstop
+
 OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
@@ -263,7 +265,7 @@ def _area_km2(south: float, west: float, north: float, east: float) -> float:
 
 def fetch_features_tiled(south: float, west: float, north: float, east: float,
                          max_tile_km2: float = 30.0, timeout: int = 90,
-                         progress=None) -> list[OSMFeature]:
+                         progress=None, should_stop=None) -> list[OSMFeature]:
     """Fetch a large bbox as a grid of smaller Overpass queries.
 
     One query over a big area either times out or gets refused - that, not the
@@ -312,6 +314,10 @@ def fetch_features_tiled(south: float, west: float, north: float, east: float,
     def run(args) -> list[OSMFeature]:
         nonlocal done
         index, (s0, w0, n0, e0) = args
+        # Between tiles is the one place a download can be dropped without
+        # leaving a half-written cache behind; the tiles already in flight
+        # finish and are thrown away with the rest.
+        knoxstop.check(should_stop, "the download")
         try:
             return _fetch_splitting(s0, w0, n0, e0, timeout, first=index)
         finally:

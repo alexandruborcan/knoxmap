@@ -321,6 +321,37 @@ def check_street_zombies(check) -> None:
         shutil.rmtree(work, ignore_errors=True)
 
 
+def check_stop(check) -> None:
+    """Stopping a long job: it gives up where it is asked to, and nothing it
+    was working on is thrown away (knoxstop.py)."""
+    import knoxstop
+
+    stop = {"now": False}
+    asked = lambda: stop["now"]          # noqa: E731 - what the jobs are given
+
+    knoxstop.check(asked, "the download")    # not asked yet: no exception
+    check(True, "a job that has not been stopped carries on")
+
+    stop["now"] = True
+    try:
+        knoxstop.check(asked, "the download")
+        stopped = False
+    except knoxstop.Stopped as exc:
+        stopped = "download" in str(exc)
+    check(stopped, "a job that has been stopped raises Stopped, saying which")
+
+    # The compile stops between batches and kills the batch it is in.
+    import inspect
+
+    from tools import compile_map as compiler
+    src = inspect.getsource(compiler.compile_map)
+    check("should_stop" in inspect.signature(compiler.compile_map).parameters
+          and "_run_batch" in src,
+          "the compile watches for a stop inside a batch, not only between them")
+    check("terminate" in inspect.getsource(compiler._run_batch),
+          "and closes WorldEd down rather than waiting it out")
+
+
 def check_repair(check, out: str) -> None:
     """A project broken at its edges, as older versions and hand edits leave
     them, is repaired before compiling instead of stopping it."""
@@ -698,6 +729,7 @@ def main(argv: list[str]) -> int:
         check(len(school) >= 1, "the school has classrooms")
         check_1_3_6(check, out, tbx, pzw_text, log.getvalue())
         check_street_zombies(check)
+        check_stop(check)
         texts = [open(p, encoding="utf-8").read() for p in tbx]
         windows = {m for t in texts for m in re.findall(r'category="windows">\s*<tile enum="West" tile="(\w+)"', t)}
         check(len(windows) >= 3, f"window styles vary ({len(windows)})")
