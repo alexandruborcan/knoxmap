@@ -326,13 +326,74 @@ def index():
 TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 TILE_CACHE = BASE_DIR / "cache" / "tiles"
 TILE_MIN_AGE = 7 * 24 * 3600
-TILE_FETCHES = threading.BoundedSemaphore(2)   # a couple at a time, no more
+# How many tiles are fetched at once. A map view is twenty or thirty tiles,
+# and at two at a time they arrived in a slow ripple; a browser asking
+# tile.openstreetmap.org directly opens six connections, so four through one
+# proxy is no heavier than the page would be on its own. This is interactive
+# browsing, not the bulk downloading the tile policy asks people not to do.
+TILE_FETCHES = threading.BoundedSemaphore(4)
+# One connection pool for all of them. Without it every tile paid for a new
+# TCP connection and a TLS handshake - most of the wait, on a map of tiles
+# that are only a few kilobytes each.
+TILE_TIMEOUT = (5, 15)          # connect, read
+_TILE_SESSION = None
+_TILE_SESSION_LOCK = threading.Lock()
+# Tiles being revalidated in the background, so a stale one is not fetched
+# once per request while the first fetch is still running.
+_TILE_REVALIDATING: set = set()
+
+
+def _tile_session():
+    global _TILE_SESSION
+    with _TILE_SESSION_LOCK:
+        if _TILE_SESSION is None:
+            import requests
+            from requests.adapters import HTTPAdapter
+
+            session = requests.Session()
+            adapter = HTTPAdapter(pool_connections=4, pool_maxsize=8)
+            session.mount("https://", adapter)
+            session.headers["User-Agent"] = places.HEADERS["User-Agent"]
+            _TILE_SESSION = session
+    return _TILE_SESSION
+
+
+def _fetch_tile(z: int, x: int, y: int, path, meta, info: dict) -> bool:
+    """Fetch or revalidate one tile. True when it is on disk afterwards."""
+    import requests
+
+    headers = {}
+    if path.exists() and info.get("etag"):
+        headers["If-None-Match"] = info["etag"]
+    try:
+        with TILE_FETCHES:
+            r = _tile_session().get(TILE_URL.format(z=z, x=x, y=y),
+                                    headers=headers, timeout=TILE_TIMEOUT)
+    except requests.RequestException:
+        return path.exists()
+    if r.status_code not in (200, 304):
+        return path.exists()
+    max_age = TILE_MIN_AGE
+    for part in (r.headers.get("Cache-Control") or "").split(","):
+        if part.strip().startswith("max-age="):
+            try:
+                max_age = max(TILE_MIN_AGE, int(part.split("=", 1)[1]))
+            except ValueError:
+                pass
+    if r.status_code == 200:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(r.content)
+        info["etag"] = r.headers.get("ETag")
+    info["expires"] = time.time() + max_age
+    try:
+        meta.write_text(json.dumps(info), encoding="utf-8")
+    except OSError:
+        pass
+    return path.exists()
 
 
 @app.route("/tiles/<int:z>/<int:x>/<int:y>.png")
 def tile(z: int, x: int, y: int):
-    import requests
-
     if not (0 <= z <= 19 and 0 <= x < 2 ** z and 0 <= y < 2 ** z):
         return ("", 404)
     path = TILE_CACHE / str(z) / str(x) / f"{y}.png"
@@ -344,32 +405,25 @@ def tile(z: int, x: int, y: int):
         except (OSError, ValueError):
             info = {}
     fresh = path.exists() and time.time() < info.get("expires", 0)
-    if not fresh:
-        headers = {"User-Agent": places.HEADERS["User-Agent"]}
-        if path.exists() and info.get("etag"):
-            headers["If-None-Match"] = info["etag"]
-        try:
-            with TILE_FETCHES:
-                r = requests.get(TILE_URL.format(z=z, x=x, y=y), headers=headers, timeout=20)
-            if r.status_code == 200 or r.status_code == 304:
-                max_age = TILE_MIN_AGE
-                for part in (r.headers.get("Cache-Control") or "").split(","):
-                    if part.strip().startswith("max-age="):
-                        try:
-                            max_age = max(TILE_MIN_AGE, int(part.split("=", 1)[1]))
-                        except ValueError:
-                            pass
-                if r.status_code == 200:
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_bytes(r.content)
-                    info["etag"] = r.headers.get("ETag")
-                info["expires"] = time.time() + max_age
-                meta.write_text(json.dumps(info), encoding="utf-8")
-            elif not path.exists():
-                return ("", r.status_code)
-        except requests.RequestException:
-            if not path.exists():
-                return ("", 502)
+    if path.exists() and not fresh:
+        # A tile we already have is served straight away and checked against
+        # the server behind the page's back. Waiting on that round trip made
+        # panning back over somewhere already visited as slow as the first
+        # time, for a picture of a street that had not changed in a week.
+        key = (z, x, y)
+        if key not in _TILE_REVALIDATING:
+            _TILE_REVALIDATING.add(key)
+
+            def revalidate():
+                try:
+                    _fetch_tile(z, x, y, path, meta, info)
+                finally:
+                    _TILE_REVALIDATING.discard(key)
+
+            threading.Thread(target=revalidate, name=f"tile-{z}-{x}-{y}",
+                             daemon=True).start()
+    elif not fresh and not _fetch_tile(z, x, y, path, meta, info):
+        return ("", 502)
     resp = send_file(path, mimetype="image/png")
     resp.headers["Cache-Control"] = f"max-age={TILE_MIN_AGE}"
     return resp
