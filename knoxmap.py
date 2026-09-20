@@ -13,6 +13,7 @@ Compiling uses the patched PZWorldEd_cli.exe that Setup installs (see
 worlded/README.md); without it the app opens WorldEd on the project instead.
 
 Run it with:  pythonw knoxmap.py      (or double-click KnoxMap.bat)
+On Linux or macOS:  ./knoxmap.sh
 """
 from __future__ import annotations
 
@@ -65,7 +66,6 @@ def main() -> int:
         updater.relaunch()
         return 0
     os.environ["KNOXMAP_WINDOW"] = "1"
-    import webview
 
     import app  # noqa: F401 - fail here, where it can be reported, not in the thread
 
@@ -75,13 +75,73 @@ def main() -> int:
         raise RuntimeError("the local server did not start within 20 seconds")
     updater.check_in_background()
 
-    # Painted the page's own near-black before anything loads, so the window
-    # does not flash white for the second it takes Flask to answer.
-    webview.create_window(f"{TITLE} ({knoxlog.version()})", f"http://127.0.0.1:{port}/",
-                          width=1440, height=920, min_size=(1000, 680),
-                          background_color="#07090B")
-    webview.start()
+    url = f"http://127.0.0.1:{port}/"
+    if in_a_browser():
+        return show_in_browser(url)
+    try:
+        import webview
+
+        # Painted the page's own near-black before anything loads, so the
+        # window does not flash white for the second it takes Flask to answer.
+        webview.create_window(f"{TITLE} ({knoxlog.version()})", url,
+                              width=1440, height=920, min_size=(1000, 680),
+                              background_color="#07090B")
+        webview.start()
+    except Exception as exc:  # noqa: BLE001 - see in_a_browser
+        knoxlog.log.warning("no native window (%s); opening a browser instead", exc)
+        return show_in_browser(url)
     return 0
+
+
+def in_a_browser() -> bool:
+    """Whether to skip the native window and use the player's browser.
+
+    KnoxMap is a web page either way, so a browser tab is a perfectly good
+    window - and on Linux it is often the only one there is. pywebview needs
+    a system toolkit behind it (WebKitGTK through PyGObject, or Qt WebEngine)
+    that pip cannot install, and a machine without one has no window at all.
+    KNOXMAP_BROWSER=1 forces this on any system.
+    """
+    if os.environ.get("KNOXMAP_BROWSER") == "1":
+        return True
+    if os.name == "nt" or sys.platform == "darwin":
+        return False        # WebView2 and WKWebView ship with the system
+    try:
+        import webview       # noqa: F401
+    except ImportError:
+        return True
+    # pywebview picks its toolkit at import time and raises on start when
+    # there is none; asking it now says so before the page is served.
+    try:
+        from webview import guilib
+        guilib.initialize()
+    except Exception:        # noqa: BLE001 - no toolkit, or a broken one
+        return True
+    return False
+
+
+def show_in_browser(url: str) -> int:
+    """Serve KnoxMap and open it in the default browser, in the foreground.
+
+    The window is what usually keeps the process alive; without one this
+    waits instead, so closing the terminal is what ends KnoxMap.
+    """
+    import webbrowser
+
+    # Downloads go through the browser here, not through /api/save, which is
+    # the app window's way round having nowhere to put a file.
+    os.environ["KNOXMAP_WINDOW"] = "0"
+    print(f"KnoxMap is running at {url}", flush=True)
+    print("Leave this window open while you use it; press Ctrl+C to stop.", flush=True)
+    try:
+        webbrowser.open(url)
+    except Exception:        # noqa: BLE001 - no browser configured; the URL is printed
+        pass
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        return 0
 
 
 def report_crash() -> None:
@@ -100,9 +160,10 @@ def report_crash() -> None:
         eid = ""
         where = BASE_DIR / "knoxmap_error.log"
         where.write_text(traceback.format_exc(), encoding="utf-8")
+    setup = "Setup.bat" if os.name == "nt" else "./setup.sh"
     text = (f"KnoxMap could not start:\n\n{sys.exc_info()[1]}\n\n"
             f"Details were saved to {where}{eid}.\n"
-            "Running Setup.bat again fixes most problems. If it does not, post "
+            f"Running {setup} again fixes most problems. If it does not, post "
             "that file in #bug-reports on the KnoxMap Discord.")
     try:
         import ctypes

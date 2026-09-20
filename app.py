@@ -1048,16 +1048,17 @@ def api_setup_status():
     tools = knoxpaths.mapping_tools_dir()
     cli = knoxpaths.worlded_cli()
     game = knoxpaths.pz_install_dir()
+    setup = knoxpaths.setup_command()
     tiles = 0
     if tools and (tools / "Tiles" / "2x").is_dir():
         tiles = sum(1 for _ in (tools / "Tiles" / "2x").glob("*.png"))
     checks = [
         {"id": "tools", "ok": bool(tools), "label": "PZ Mapping Tools",
-         "fix": "Run Setup.bat to download them."},
+         "fix": f"Run {setup} to download them."},
         {"id": "compiler", "ok": bool(cli), "label": "Patched map compiler",
-         "fix": "Run Setup.bat, or compile by hand with Open in WorldEd."},
+         "fix": f"Run {setup}, or compile by hand with Open in WorldEd."},
         {"id": "game", "ok": bool(game), "label": "Project Zomboid install",
-         "fix": "Install the game, then run Setup.bat again."},
+         "fix": f"Install the game, then run {setup} again."},
         {"id": "build42", "ok": knoxpaths.is_build42(game),
          "label": "Project Zomboid Build 42",
          "fix": "Your game looks like Build 41. In Steam choose the Build 42 "
@@ -1067,14 +1068,25 @@ def api_setup_status():
         {"id": "python64", "ok": sys.maxsize > 2 ** 32, "label": "64-bit Python",
          "fix": "KnoxMap is running 32-bit Python, which can only use about 2 GB of "
                 "memory, so anything past a few square kilometres fails. Close KnoxMap "
-                "and run Setup.bat again: it fetches a 64-bit Python."},
+                f"and run {setup} again: it fetches a 64-bit Python."},
         {"id": "tiles", "ok": tiles >= 400, "label": "Tile artwork from your game",
-         "fix": "Run Setup.bat to extract it from your install."},
+         "fix": f"Run {setup} to extract it from your install."},
         # Added to the tools after KnoxMap 1.0's first setups: without them a
         # compile still works but lays no kerbs or road markings, silently.
         {"id": "road_rules", "ok": _has_road_rules(tools), "label": "Kerbs and road markings",
-         "fix": "Run Setup.bat again to add them to the map tools."},
+         "fix": f"Run {setup} again to add them to the map tools."},
     ]
+    # The map tools are Windows programs. Off Windows they run under Wine,
+    # which a PC playing Project Zomboid through Proton already has - but not
+    # always on the path, and not at all on a machine with a native build of
+    # the game. Everything but Compile works without it.
+    if os.name != "nt":
+        checks.append(
+            {"id": "wine", "ok": knoxpaths.tools_runnable(), "label": "Wine (to run the map tools)",
+             "fix": "The map tools are Windows programs. Install wine with your package "
+                    "manager (apt install wine, pacman -S wine, dnf install wine), or set "
+                    "KNOXMAP_WINE to the build you want used. Everything except Compile "
+                    "works without it."})
     optional = [
         {"id": "elevators", "ok": knoxpaths.elevators_mod_installed(),
          "label": "Elevators mod (optional)",
@@ -1084,7 +1096,7 @@ def api_setup_status():
          "fix": "Subscribe to it on the Steam Workshop to start at any landmark of your map."},
         {"id": "erikas_tiles", "ok": knoxpaths.erikas_tiles_ready(),
          "label": "Erika's Tiles (optional)",
-         "fix": "Subscribe to it on the Steam Workshop and run Setup.bat again for glass shop "
+         "fix": f"Subscribe to it on the Steam Workshop and run {setup} again for glass shop "
                 "fronts and signs, street signs, and far more varied pictures, posters and "
                 "plants. Maps made with it require it."},
     ]

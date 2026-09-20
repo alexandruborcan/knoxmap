@@ -352,6 +352,69 @@ def check_stop(check) -> None:
           "and closes WorldEd down rather than waiting it out")
 
 
+def check_portable(check) -> None:
+    """Running off Windows: the map tools through Wine, the private Python in
+    bin/ rather than Scripts/, Steam where this system keeps it, and a window
+    that falls back to the browser. On the Linux CI these run for real."""
+    import knoxmap
+    import knoxpaths
+
+    windows = os.name == "nt"
+
+    # The map tools are Windows programs. Off Windows they go through Wine;
+    # a build made for this system (no .exe) is run directly either way.
+    wine_cmd = knoxpaths.command_for("/tools/bin/PZWorldEd_cli.exe")
+    native = knoxpaths.command_for("/tools/bin/PZWorldEd_cli")
+    check(len(native) == 1 and native[0].endswith("PZWorldEd_cli"),
+          "a build of the map tools for this system is run directly")
+    check(wine_cmd == ["/tools/bin/PZWorldEd_cli.exe"] if windows
+          else (len(wine_cmd) == 2 and wine_cmd[0].endswith("wine")),
+          "a .exe is run through Wine off Windows, and directly on it")
+    os.environ["KNOXMAP_WINE"] = "/opt/wine/bin/wine"
+    try:
+        chosen = knoxpaths.command_for("/tools/bin/PZWorldEd_cli.exe")
+        check(chosen[0] == "/opt/wine/bin/wine" if not windows else True,
+              "KNOXMAP_WINE picks which Wine runs them")
+    finally:
+        del os.environ["KNOXMAP_WINE"]
+
+    # Setup puts the private Python in Scripts/ on Windows and bin/ elsewhere.
+    python = str(knoxpaths.venv_python())
+    wanted = "Scripts" if windows else "bin"
+    check(python.endswith((".exe", "python", "python3"))
+          and (wanted in python or python == sys.executable),
+          f"the private Python is looked for in {wanted}/ ({os.path.basename(python)})")
+    check(str(knoxpaths.venv_python(windowless=True)).endswith(
+        "pythonw.exe" if windows else ("python", "python3")),
+        "and the windowless one only where there is one")
+
+    # Steam, where this system keeps it.
+    roots = [str(p) for p in knoxpaths._steam_roots()]
+    check(bool(roots) and all(("Steam" in r or "steam" in r) for r in roots),
+          f"Steam is looked for where this system keeps it ({len(roots)} places)")
+    check(all("\\" not in name for name in knoxpaths._LIBRARY_NAMES) if not windows
+          else True,
+          "and library folder names use this system's separator")
+    check(knoxpaths.setup_command() == ("Setup.bat" if windows else "./setup.sh"),
+          f"the window names the right setup script ({knoxpaths.setup_command()})")
+
+    # A machine with no desktop toolkit still gets the whole app, in a browser.
+    os.environ["KNOXMAP_BROWSER"] = "1"
+    try:
+        check(knoxmap.in_a_browser(), "KNOXMAP_BROWSER opens it in a browser instead")
+    finally:
+        del os.environ["KNOXMAP_BROWSER"]
+    check(windows or not knoxpaths.wine() or knoxpaths.tools_runnable(),
+          "with Wine on the path, the map tools count as runnable")
+
+    # The launchers must keep LF, or /bin/sh chokes on the carriage returns.
+    root = Path(__file__).resolve().parent.parent
+    for name in ("setup.sh", "knoxmap.sh"):
+        path = root / name
+        if path.exists():
+            check(b"\r\n" not in path.read_bytes(), f"{name} has no carriage returns in it")
+
+
 def check_repair(check, out: str) -> None:
     """A project broken at its edges, as older versions and hand edits leave
     them, is repaired before compiling instead of stopping it."""
@@ -730,6 +793,7 @@ def main(argv: list[str]) -> int:
         check_1_3_6(check, out, tbx, pzw_text, log.getvalue())
         check_street_zombies(check)
         check_stop(check)
+        check_portable(check)
         texts = [open(p, encoding="utf-8").read() for p in tbx]
         windows = {m for t in texts for m in re.findall(r'category="windows">\s*<tile enum="West" tile="(\w+)"', t)}
         check(len(windows) >= 3, f"window styles vary ({len(windows)})")

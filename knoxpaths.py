@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -89,6 +90,63 @@ def command_for(program: Path | str) -> list[str]:
     return [program]
 
 
+def venv_python(windowless: bool = False) -> Path:
+    """The Python inside KnoxMap's own .venv, whichever PC this is.
+
+    Setup puts it in Scripts/ on Windows and bin/ everywhere else, and only
+    Windows has a windowless build. Falls back to the Python running now, so
+    a checkout without a .venv still works.
+    """
+    if os.name == "nt":
+        names = ("pythonw.exe", "python.exe") if windowless else ("python.exe",)
+        folder = BASE_DIR / ".venv" / "Scripts"
+    else:
+        names = ("python3", "python")
+        folder = BASE_DIR / ".venv" / "bin"
+    for name in names:
+        if _exists(folder / name):
+            return folder / name
+    import sys
+    if windowless and os.name == "nt":
+        beside = Path(sys.executable).with_name("pythonw.exe")
+        if _exists(beside):
+            return beside
+    return Path(sys.executable)
+
+
+def setup_command() -> str:
+    """What to tell the player to run: the setup script this PC has."""
+    return "Setup.bat" if os.name == "nt" else "./setup.sh"
+
+
+def wine() -> str | None:
+    """The Wine that runs the map tools off Windows, or None if there is none.
+
+    The tools are Windows programs. A PC that plays Project Zomboid through
+    Proton already has Wine in one form or another, but not always on the
+    path under that name, so KNOXMAP_WINE can point at any build.
+    """
+    if os.name == "nt":
+        return None
+    import shutil
+    chosen = os.environ.get("KNOXMAP_WINE")
+    if chosen:
+        return chosen if (shutil.which(chosen) or _exists(Path(chosen))) else None
+    return shutil.which("wine") or shutil.which("wine64")
+
+
+def tools_runnable() -> bool:
+    """Whether the map tools can be run at all on this PC: they are Windows
+    programs, so off Windows that needs either Wine or a native build of them
+    (one with no .exe on the end)."""
+    if os.name == "nt":
+        return True
+    cli = worlded_cli()
+    if cli and not str(cli).lower().endswith(".exe"):
+        return True                 # built for this system, run directly
+    return wine() is not None
+
+
 def chosen_steam_folders() -> list[str]:
     """Drives or folders the player named as holding Steam games, in the app
     or in Setup, looked in before anything found automatically. The
@@ -125,8 +183,16 @@ def library_of(folder: str | Path) -> list[Path]:
     return [c for c in candidates if _is_dir(c / "steamapps")]
 
 
-_LIBRARY_NAMES = ("SteamLibrary", "Steam", "Steam Library", "Games\\Steam", "Games\\SteamLibrary",
-                  "Program Files (x86)\\Steam", "Program Files\\Steam")
+# Folders a Steam library is usually called, relative to a drive or a mount
+# point. Separators differ, so the two lists are kept apart rather than one
+# list with backslashes in it - on Linux "Games\\Steam" is a single file name
+# with a backslash in the middle of it.
+_LIBRARY_NAMES_NT = ("SteamLibrary", "Steam", "Steam Library", "Games\\Steam",
+                     "Games\\SteamLibrary", "Program Files (x86)\\Steam",
+                     "Program Files\\Steam")
+_LIBRARY_NAMES_POSIX = ("SteamLibrary", "Steam", "Steam Library", "Games/Steam",
+                        "Games/SteamLibrary", "steam", "steamlibrary")
+_LIBRARY_NAMES = _LIBRARY_NAMES_NT if os.name == "nt" else _LIBRARY_NAMES_POSIX
 
 
 def steam_libraries_found() -> list[dict]:
@@ -175,8 +241,7 @@ def _find_steam_libraries() -> list[Path]:
                 pass
     except ImportError:
         pass
-    roots += [Path(r"C:\Program Files (x86)\Steam"), Path.home() / ".steam" / "steam",
-              Path.home() / ".local" / "share" / "Steam"]
+    roots += _steam_roots()
 
     for root in roots:
         vdf = root / "steamapps" / "libraryfolders.vdf"
@@ -195,6 +260,9 @@ def _find_steam_libraries() -> list[Path]:
     if os.name == "nt":
         for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
             libraries += [Path(f"{letter}:\\") / sub for sub in _LIBRARY_NAMES]
+    else:
+        for place in _mounted_places():
+            libraries += [place / sub for sub in _LIBRARY_NAMES]
     seen, unique = set(), []
     for lib in libraries:
         key = str(lib).lower()
@@ -202,6 +270,55 @@ def _find_steam_libraries() -> list[Path]:
             seen.add(key)
             unique.append(lib)
     return unique
+
+
+def _steam_roots() -> list[Path]:
+    """Where Steam itself is installed, on whichever system this is.
+
+    Linux has the two paths every distribution uses, the Flatpak one (whose
+    files live under ~/.var and are invisible to the others), and the Snap
+    one; macOS keeps it in Application Support. The libraries on other disks
+    are found from libraryfolders.vdf inside whichever of these exists.
+    """
+    home = Path.home()
+    if os.name == "nt":
+        return [Path(r"C:\Program Files (x86)\Steam"), Path(r"C:\Program Files\Steam")]
+    if sys.platform == "darwin":
+        return [home / "Library" / "Application Support" / "Steam"]
+    return [
+        home / ".steam" / "steam",
+        home / ".steam" / "root",
+        home / ".local" / "share" / "Steam",
+        home / ".var" / "app" / "com.valvesoftware.Steam" / ".local" / "share" / "Steam",
+        home / "snap" / "steam" / "common" / ".local" / "share" / "Steam",
+    ]
+
+
+# Where a second disk is mounted, for a library Steam's own files do not name
+# - the Linux answer to looking on every drive letter.
+_MOUNT_POINTS = ("/mnt", "/media", "/run/media", "/srv", "/games")
+
+
+def _mounted_places() -> list[Path]:
+    """Every mounted disk, plus the home folder: the places a library that
+    Steam has forgotten about might be."""
+    out = [Path.home()]
+    for base in _MOUNT_POINTS:
+        root = Path(base)
+        if not _is_dir(root):
+            continue
+        for child in _children(root):
+            out.append(child)
+            # /run/media/<user>/<disk> on most desktops.
+            out.extend(_children(child))
+    return out
+
+
+def _children(path: Path) -> list[Path]:
+    try:
+        return [p for p in path.iterdir() if p.is_dir()]
+    except (OSError, ValueError):
+        return []
 
 
 def _exists(path: Path) -> bool:

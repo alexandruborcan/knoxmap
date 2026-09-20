@@ -11,6 +11,7 @@
 <p align="center">
   <img alt="Project Zomboid Build 42" src="https://img.shields.io/badge/Project%20Zomboid-Build%2042-8b0000"/>
   <img alt="Windows 10/11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078d6"/>
+  <img alt="Linux and macOS" src="https://img.shields.io/badge/Linux%20%C2%B7%20macOS-supported-4c8b2b"/>
   <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776ab"/>
   <img alt="Unofficial fan project" src="https://img.shields.io/badge/unofficial-fan%20project-555"/>
 </p>
@@ -101,6 +102,11 @@ actually lived, and installs the result as a mod.
 **You need:** Windows 10 or 11 · **Project Zomboid Build 42** installed through
 Steam · an internet connection. Python is optional: if your PC doesn't have it,
 setup downloads a private copy into the KnoxMap folder.
+
+**On Linux or macOS** it is `./setup.sh` once and `./knoxmap.sh` after that,
+and you need your own 64-bit Python 3.10+. Everything works; Compile runs the
+map tools through Wine, which a PC playing Project Zomboid through Proton
+already has. See [LINUX.md](LINUX.md).
 
 1. **Download KnoxMap**: the newest `KnoxMap-v….zip` from
    [Releases](https://github.com/spytheeuclidean-a11y/knoxmap/releases/latest),
@@ -218,7 +224,9 @@ second without rebuilding, then compile again so the game sees the change.
 
 - **Project Zomboid Build 42 only.** Build 41 cannot load these maps, and setup
   warns you if your game looks like Build 41.
-- **Windows only.** The map compiler is a Windows program.
+- **The map compiler is a Windows program.** On Linux and macOS it runs
+  under Wine ([LINUX.md](LINUX.md)); every other step is Python and needs
+  nothing. Without Wine you can still compile by hand in WorldEd.
 - **Mods:** the generated map is an ordinary map mod. Lifts need the optional
   [Elevators](https://steamcommunity.com/sharedfiles/filedetails/?id=3780306632)
   mod; without it they are just closed doors. With the optional
@@ -259,6 +267,7 @@ playing. Help is very welcome here, especially screenshots from the game.
 | *OSM query failed* | The free OpenStreetMap servers are busy. Wait a minute and try again, or choose a smaller area. |
 | The map is not in the game | Enable it under **Mods**, then start a **new** game. |
 | The window is blank | Install the [Microsoft Edge WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (built into Windows 11). |
+| It opened in my browser instead of a window (Linux) | That is the whole app — nothing is missing. For a window of its own, install a desktop toolkit; see [LINUX.md](LINUX.md). |
 | KnoxMap closes straight away | It shows a message and writes the error to `logs/knoxmap.log`. Running `Setup.bat` again fixes most causes. |
 
 ### Reporting a problem

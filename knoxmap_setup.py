@@ -82,7 +82,9 @@ def download(url: str, what: str) -> bytes:
 def ensure_mapping_tools() -> Path:
     step(1, "PZ Mapping Tools")
     existing = knoxpaths.mapping_tools_dir()
-    if existing and (existing / "bin" / "PZWorldEd.exe").exists():
+    # worlded_gui finds either the Windows build or one compiled for this
+    # system, so a native build is not thrown away and downloaded over.
+    if existing and knoxpaths.worlded_gui():
         say(f"      found at {existing}")
         return existing
 
@@ -116,6 +118,10 @@ def sha256(path: Path) -> str:
 
 def ensure_patched_cli(tools: Path) -> bool:
     step(2, "Patched map compiler (PZWorldEd_cli.exe)")
+    native = knoxpaths.worlded_cli()
+    if native and not str(native).lower().endswith(".exe"):
+        say(f"      found a build for this system at {native}")
+        return True
     exe = tools / "bin" / "PZWorldEd_cli.exe"
     if exe.exists():
         have = sha256(exe)

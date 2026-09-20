@@ -356,9 +356,8 @@ def apply_staged() -> bool:
     zip_path.unlink(missing_ok=True)
     log.info("update: now on KnoxMap %s", staged["version"])
 
-    python = BASE_DIR / ".venv" / "Scripts" / "python.exe"
-    if not python.exists():
-        python = Path(sys.executable)
+    import knoxpaths
+    python = knoxpaths.venv_python()
     if _digest(BASE_DIR / "requirements.txt") != watched["requirements.txt"]:
         _run([str(python), "-m", "pip", "install", "--disable-pip-version-check", "-q",
               "-r", str(BASE_DIR / "requirements.txt")], "update: Python packages")
@@ -381,14 +380,22 @@ def _run(cmd: list[str], what: str, env: dict | None = None) -> None:
 
 
 def relaunch() -> None:
-    """Start a fresh KnoxMap window, on whatever code is on disk now."""
-    exe = Path(sys.executable)
-    windowless = exe.with_name("pythonw.exe")
-    if windowless.exists():
-        exe = windowless
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen([str(exe), str(BASE_DIR / "knoxmap.py")], cwd=BASE_DIR,
-                     creationflags=flags, close_fds=True)
+    """Start a fresh KnoxMap window, on whatever code is on disk now.
+
+    The new window must outlive this one, which is about to end. Windows
+    wants the detached-process flags; everywhere else that is a session of
+    its own, or the new window dies with the terminal the old one was
+    started from.
+    """
+    import knoxpaths
+    exe = knoxpaths.venv_python(windowless=True)
+    kwargs: dict = {"cwd": BASE_DIR, "close_fds": True}
+    if os.name == "nt":
+        kwargs["creationflags"] = (getattr(subprocess, "DETACHED_PROCESS", 0)
+                                   | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    else:
+        kwargs["start_new_session"] = True
+    subprocess.Popen([str(exe), str(BASE_DIR / "knoxmap.py")], **kwargs)
 
 
 def restart() -> None:

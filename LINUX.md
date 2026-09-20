@@ -1,0 +1,82 @@
+# KnoxMap on Linux and macOS
+
+Everything KnoxMap does itself is Python, and runs anywhere Python does:
+downloading the area from OpenStreetMap, drawing the terrain, laying out and
+furnishing the buildings, writing the paper map and installing the mod. Only
+one step needs help, and that is **Compile**, which drives the PZ Mapping
+Tools — Windows programs, run here through Wine.
+
+    ./setup.sh        once
+    ./knoxmap.sh      every time
+
+If the scripts are not executable after a `git clone` or an unzip:
+
+    chmod +x setup.sh knoxmap.sh
+
+## What setup does
+
+The same as `Setup.bat`: a private Python environment in `.venv`, the PZ
+Mapping Tools into `vendor/`, the patched map compiler, and the tile artwork
+extracted from **your own copy of the game** — never downloaded.
+
+It needs 64-bit Python 3.10 or newer. A 32-bit one can only address about
+2 GB, which a town-sized map runs out of part-way through.
+
+    sudo apt install python3 python3-venv python3-pip     # Debian, Ubuntu
+    sudo pacman -S python                                 # Arch
+    sudo dnf install python3                              # Fedora
+
+## The window
+
+On Windows KnoxMap opens in a native window (Edge WebView2) and on macOS in
+a WKWebView one. On Linux pywebview needs a system toolkit behind it that pip
+cannot install, so if there is none KnoxMap **opens in your browser instead**
+and prints the address it is serving on. That is the whole app; nothing is
+missing from it.
+
+For a real window, install one of the toolkits first and KnoxMap will use it:
+
+    sudo apt install python3-gi gir1.2-webkit2-4.1 python3-gi-cairo   # GTK
+    .venv/bin/python -m pip install "pywebview[qt]"                   # or Qt
+
+`KNOXMAP_BROWSER=1 ./knoxmap.sh` forces the browser on any system.
+
+## Compile, and Wine
+
+The map compiler (`PZWorldEd_cli.exe`) is a Windows program. KnoxMap runs it
+through Wine, which a PC that plays Project Zomboid through Proton already
+has in some form:
+
+    sudo apt install wine       # or wine64, or your distribution's package
+
+`KNOXMAP_WINE=/path/to/wine ./knoxmap.sh` points KnoxMap at a particular
+build — a Proton runtime's, for instance.
+
+Without Wine every step except Compile works, and the window says so under
+**Setup isn't finished**. You can still finish a map by hand: use **Open in
+WorldEd** and run *BMP To TMX → All Cells* and *Generate Lots → All Cells*
+yourself, then **Install**.
+
+If you build the tools natively (see `worlded/README.md`), drop the
+binaries in `vendor/PZMappingTools/bin/` **without** the `.exe` — KnoxMap
+finds `PZWorldEd_cli` as readily as `PZWorldEd_cli.exe`, runs it directly,
+and setup leaves it alone.
+
+## Where things are found
+
+- **The game**, and the mods folder it installs into, come from Steam:
+  `~/.steam/steam`, `~/.local/share/Steam`, the Flatpak
+  (`~/.var/app/com.valvesoftware.Steam/…`) and Snap paths, plus every
+  library `libraryfolders.vdf` names. Libraries on a second disk are looked
+  for under `/mnt`, `/media`, `/run/media` and your home folder.
+- **Saves and mods** are in `~/Zomboid`, as on Windows. `ZOMBOID_DIR` moves
+  that if yours is somewhere else.
+- If a library is somewhere none of this looks, add it in the window under
+  **Steam libraries**, or set `KNOXMAP_STEAM_FOLDERS=/path/one;/path/two`.
+
+## Proton and the game's memory
+
+A big map needs more memory than Project Zomboid gives itself. Under Proton
+the setting is in the same place as on Windows — `ProjectZomboid64.json` in
+the game folder — and a map's mod folder carries a `HOW TO PLAY.txt` saying
+what to change when it is big enough to matter.

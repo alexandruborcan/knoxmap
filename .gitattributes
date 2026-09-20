@@ -2,6 +2,10 @@
 # gets them, or cmd can mis-jump to labels.
 *.bat -text
 
+# Shell scripts must keep LF, or /bin/sh reads the carriage return as part of
+# the command, and every line fails on a stray carriage return.
+*.sh text eol=lf
+
 # Third-party files bundled as published: keep their bytes exactly.
 static/vendor/** -text
 
