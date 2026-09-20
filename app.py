@@ -1005,11 +1005,14 @@ def _has_road_rules(tools) -> bool:
         return False
     rules = tools / "config" / "Rules.txt"
     try:
-        # The newest rule, so tools patched before street furniture existed
-        # are sent back through Setup.
-        return "KnoxMap road Yard bed_soil" in rules.read_text(encoding="utf-8", errors="replace")
+        text = rules.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
+    # The newest rule, so tools patched before street furniture existed are
+    # sent back through Setup - and no blank litter tile, so are the ones
+    # patched while the litter rule still named trash_01_13 and 14, which the
+    # game draws as a question mark.
+    return "KnoxMap road Yard bed_soil" in text and "trash_01_13" not in text
 
 
 @app.route("/api/settings")

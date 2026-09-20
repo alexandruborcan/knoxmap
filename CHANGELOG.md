@@ -47,6 +47,34 @@ lands the same way on a town in Kentucky, in Australia or in Turkey.
 - Installing clears the old map out of the mod folder first. A map rebuilt
   smaller used to ship its old cells alongside the new ones.
 
+Reported in #report-the-bugs:
+
+- **The question marks on the pavement.** The litter rule named
+  `trash_01_13`, `14` and `15`, which are blank squares in the sheet Build 42
+  ships: the game logged "missing tile trash_01_14" and drew a question mark
+  wherever litter fell. Those are gone, one of the three mailboxes was blank
+  the same way, and Setup now checks every tile it writes into a rule against
+  the artwork so this cannot come back. Run Setup again to take the fix.
+- **Buildings with no door anywhere.** A building got exactly one, wherever
+  it landed, so a church or a works a hundred metres round had one door
+  somewhere along the back. They now get one about every thirty metres,
+  spread along the walls, and rows of shops get one per unit.
+- **Shopping malls repeating the same rack forty times.** Each aisle is drawn
+  from a mix of fittings now, changes what it holds partway along, and the
+  cross aisles are staggered, so a supermarket is not a grid of one shelf.
+- **Dark shops.** The game hangs one ceiling light off each light switch, and
+  a sales floor lit by the single switch beside its door was dark everywhere
+  else. A big room gets a switch about every eight metres.
+- **Zombies only inside the buildings.** Every zombie came from a building,
+  so a town OpenStreetMap has the roads of but not the houses came out empty,
+  and the streets between buildings were bare. Paved ground now carries its
+  own few, in proportion to how much of it there is.
+- Four of Erika's pictures were blank tiles and hung as nothing.
+- A map big enough to need more memory than Project Zomboid gives itself gets
+  a **HOW TO PLAY.txt** in its mod folder saying so, and how to raise it. A
+  map that tears and then closes is usually this.
+- The paper map's XML never ships without the binary the game actually reads.
+
 ## 1.3.5
 
 - A version menu: click the version at the top of the window for every

@@ -58,6 +58,46 @@ VALUE_PER_PERSON = 0.9
 # hot spots exactly the shape of buildings, and the streets between them empty.
 SPILL = 0.3
 
+# People out on the street, per chunk of made ground, before the dials.
+#
+# Every zombie used to come from a building, so a town OpenStreetMap has the
+# roads of but not the houses - which is most of the world outside Europe and
+# the cities - came out empty: "there's not really any zombies where there
+# aren't any houses, and all the zombies are heavily concentrated inside".
+# The streets themselves say a place was lived in, so paved ground carries
+# its own few, in proportion to how much of the chunk is made ground.
+STREET_PEOPLE_PER_CHUNK = 1.3
+# What counts as made ground: carriageway, pavement, car park, plaza.
+STREET_COLOURS = (C.MEDIUM_ASPHALT, C.DARKEST_ASPHALT, C.DARK_ASPHALT,
+                  C.LIGHT_ASPHALT, C.DARK_POTHOLE, C.LIGHT_POTHOLE,
+                  C.PALE_CONCRETE, C.PAVING)
+# Rows of the map measured at a time, so a town's bitmap is never held in
+# memory twice over (see renderer.BOX_STRIP_ROWS).
+GROUND_STRIP_CHUNKS = 64
+
+
+def _ground_shares(path: str, gw: int, gh: int) -> tuple[np.ndarray, np.ndarray]:
+    """(paved share, water share) of every chunk, 0..1."""
+    paved = np.zeros((gh, gw), dtype=float)
+    water = np.zeros((gh, gw), dtype=float)
+    with Image.open(path) as img:
+        ground = img.convert("RGB")
+        for top in range(0, gh, GROUND_STRIP_CHUNKS):
+            rows = min(GROUND_STRIP_CHUNKS, gh - top)
+            strip = np.asarray(ground.crop((0, top * CHUNK, gw * CHUNK,
+                                            (top + rows) * CHUNK)))
+            if strip.shape[:2] != (rows * CHUNK, gw * CHUNK):
+                continue
+            is_paved = np.zeros(strip.shape[:2], dtype=bool)
+            for colour in STREET_COLOURS:
+                is_paved |= np.all(strip == colour, axis=2)
+            is_water = np.all(strip == np.array(C.WATER), axis=2)
+            shape = (rows, CHUNK, gw, CHUNK)
+            paved[top:top + rows] = is_paved.reshape(shape).mean(axis=(1, 3))
+            water[top:top + rows] = is_water.reshape(shape).mean(axis=(1, 3))
+            del strip, is_paved, is_water
+    return paved, water
+
 
 def occupants(kind: str, tiles: int, levels: int, metres_per_tile: float,
               m2_per_person: float) -> tuple[float, float]:
@@ -108,11 +148,16 @@ def build_spawn_map(buildings: list[tuple[int, int, np.ndarray, int, str]],
 
     density = (1 - SPILL) * people + SPILL * _soften(people)
 
-    # No zombies standing in rivers and lakes.
+    street_total = 0.0
     if landscape_path and os.path.exists(landscape_path):
-        land = Image.open(landscape_path).convert("RGB").resize((gw, gh), Image.Resampling.NEAREST)
-        water = np.all(np.array(land) == np.array(C.WATER), axis=2)
-        density[water] = 0.0
+        paved, water = _ground_shares(landscape_path, gw, gh)
+        # The people who were out when it happened, wherever there is a
+        # street to be out on - even where nobody drew the buildings.
+        street = STREET_PEOPLE_PER_CHUNK * paved
+        street_total = float(street.sum())
+        density = density + street
+        # No zombies standing in rivers and lakes.
+        density[water > 0.5] = 0.0
 
     value = density * VALUE_PER_PERSON * settings.zombies_per_resident
     cap = settings.spawn_density
@@ -128,7 +173,8 @@ def build_spawn_map(buildings: list[tuple[int, int, np.ndarray, int, str]],
     summary = {
         "residents": int(round(residents_total)),
         "daytime_occupants": int(round(daytime_total)),
-        "people": int(round(residents_total + daytime_total)),
+        "on_the_street": int(round(street_total)),
+        "people": int(round(residents_total + daytime_total + street_total)),
         "zombies_per_resident": settings.zombies_per_resident,
         "m2_per_person": settings.m2_per_person,
         "horde_cap": cap,

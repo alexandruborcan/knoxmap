@@ -70,10 +70,15 @@ RULES = [
     ("Fire hydrant", (12, 36, 206), "street_decoration_01_12", "0_Furniture"),
     ("Storm drain", (12, 36, 207), ["street_decoration_01_13", "street_decoration_01_14"],
      "0_FloorOverlay6"),
-    ("Litter", (12, 36, 208), [f"trash_01_{i}" for i in range(15)], "0_FloorOverlay6"),
+    # Litter. Only 0-12: trash_01_13, 14 and 15 are blank squares in the
+    # sheet Build 42 ships, and a rule that names one puts a question mark on
+    # the pavement where the game cannot find its picture - the "?????" every
+    # street had litter on (54 and 55 are blank too, for whoever adds more).
+    ("Litter", (12, 36, 208), [f"trash_01_{i}" for i in range(13)], "0_FloorOverlay6"),
     # By each house (knoxbuild/yards.py): a mailbox where the front path meets
     # the pavement, a dustbin at the top of the drive.
-    ("Mailbox", (12, 36, 209), ["street_decoration_01_17", "street_decoration_01_18",
+    # 17 is a blank square in the sheet, and was a third of the mailboxes.
+    ("Mailbox", (12, 36, 209), ["street_decoration_01_18",
                                 "street_decoration_01_19"], "0_Furniture"),
     ("Dustbin", (12, 36, 210), "trashcontainers_01_16", "0_Furniture"),
     # Back yards: patio grill, table and chairs, a clothesline, a raised bed.
@@ -116,6 +121,44 @@ ERIKA_RULES = [
 ]
 
 
+def _blank(two_x: Path, tile: str) -> bool:
+    """Whether a tile is an empty square in its sheet.
+
+    A sheet's declared grid is often bigger than the pictures in it, and the
+    leftover cells are transparent. A rule naming one of those puts "missing
+    tile trash_01_14" in the console and a question mark on the pavement, so
+    they are dropped here rather than shipped. False when the artwork is not
+    on this PC, so patching still works without the game.
+    """
+    m = re.fullmatch(r"(.+)_(\d+)", tile)
+    if not m:
+        return False
+    sheet, idx = m.group(1), int(m.group(2))
+    if sheet in _ALPHA:
+        alpha = _ALPHA[sheet]
+    else:
+        alpha = _ALPHA[sheet] = None
+        path = two_x / f"{sheet}.png"
+        try:
+            import numpy as np
+            from PIL import Image
+
+            if path.exists():
+                with Image.open(path) as img:
+                    alpha = _ALPHA[sheet] = np.asarray(img.convert("RGBA"))[:, :, 3]
+        except Exception:                # noqa: BLE001 - no PIL, no check
+            pass
+    if alpha is None:
+        return False
+    cols = max(1, alpha.shape[1] // 128)
+    r, c = divmod(idx, cols)
+    cell = alpha[r * 256:(r + 1) * 256, c * 128:(c + 1) * 128]
+    return cell.size == 0 or not cell.any()
+
+
+_ALPHA: dict = {}
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(__doc__)
@@ -132,9 +175,18 @@ def main(argv: list[str]) -> int:
     if tilesets.exists() and "Erikas_Tiles.pack/street_roadsigns_erika_01\n" in \
             tilesets.read_text(encoding="utf-8", errors="replace"):
         rules += ERIKA_RULES
+    two_x = Path(argv[1]) / "Tiles" / "2x"
+    dropped = []
     for label, (r, g, b), tile, layer in rules:
         if isinstance(tile, list):
-            tile = "[\n" + "".join(f"        {t}\n" for t in tile) + "    ]"
+            keep = [t for t in tile if not _blank(two_x, t)]
+            dropped += [t for t in tile if t not in keep]
+            if not keep:
+                continue
+            tile = "[\n" + "".join(f"        {t}\n" for t in keep) + "    ]"
+        elif _blank(two_x, tile):
+            dropped.append(tile)
+            continue
         blocks.append(
             "rule\n{\n"
             f"    label = {MARKER} {label}\n"
@@ -149,6 +201,8 @@ def main(argv: list[str]) -> int:
         return 0
     rules_path.write_text(new_text, encoding="utf-8")
     print(f"wrote {len(blocks)} road detail rules to {rules_path} (replacing {old})")
+    if dropped:
+        print(f"    left out {len(dropped)} blank tiles: {', '.join(sorted(set(dropped)))}")
     return 0
 
 

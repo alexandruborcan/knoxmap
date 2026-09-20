@@ -78,8 +78,29 @@ _LIKE = {
     "furniturestore": ("generalstore", {"rows": "bookcases", "wall": ["wardrobe", "dresser", "sofa"],
                                         "back": ["double_bed", "wardrobe2"], "front": ["armchair"]}),
 }
+# What may stand in an aisle, besides the piece "rows" names.
+#
+# Every aisle used to be the same piece, so a supermarket or a mall came out
+# as a perfectly regular grid of one shelf repeated forty times - "shopping
+# malls generate repeated patterns of clothing racks and food shelves". Real
+# shops mix their fittings, and a long aisle changes what it holds partway
+# along, so the rows are drawn from these instead.
+AISLE_MIX = {
+    "grocery": ["shop_aisle", "shop_aisle", "shop_shelf", "shop_freezer", "shop_display"],
+    "conveniencestore": ["shop_aisle", "shop_aisle_red", "shop_shelf_red"],
+    "generalstore": ["shop_aisle", "shop_shelf", "shop_shelf_wood"],
+    "liquorstore": ["shop_aisle", "shop_shelf_wood", "shop_shelf"],
+    "pharmacy": ["shop_aisle", "shop_shelf_white", "shop_display"],
+    "clothingstore": ["clothes_rack", "clothes_rack_small", "shop_shelf_wood", "shop_display"],
+    "toolstore": ["metal_rack", "shop_shelf_wood", "shop_display"],
+}
+for _kind, _mix in AISLE_MIX.items():
+    STORES[_kind]["aisles"] = _mix
 for _kind, (_base, _over) in _LIKE.items():
     STORES[_kind] = {**STORES[_base], **_over}
+    # A shop given rows of its own does not keep the mix it was based on.
+    if "rows" in _over and "aisles" not in _over:
+        STORES[_kind]["aisles"] = [_over["rows"]]
 ANY_WALL = {"shop_aisle": "shop_shelf", "shop_aisle_red": "shop_shelf_red",
             "shop_shelf_wood": "shop_shelf", "shop_fridge_open": "shop_fridge_double",
             "clothes_rack": "shop_shelf", "metal_rack": "shop_shelf", "mirror": "shop_shelf",
@@ -276,20 +297,34 @@ def furnish_store(plan, idx: int, room, rng: random.Random, door_tiles: set,
     row_role = spec["rows"]
     every = BOOKCASE_ROW_EVERY if row_role == "bookcases" else ROW_EVERY
     orient_row = "W" if frame.along_x else "N"
+    # Bookcases stand back to back in pairs and are left alone; every other
+    # shop draws each row, and each stretch of a row, from its mix.
+    mix = [r for r in (spec.get("aisles") or [row_role]) if r in C.FURNITURE] or [row_role]
     for a in range(2, frame.length - 2, every):
         lines = [(a, "E" if frame.along_x else "S"), (a + 1, "W" if frame.along_x else "N")] \
             if row_role == "bookcases" else [(a, orient_row)]
         if any(a2 > frame.length - 3 for a2, _ in lines):
             continue
         for a2, orient in lines:
-            role = "bookshelf" if row_role == "bookcases" else row_role
+            role = "bookshelf" if row_role == "bookcases" else rng.choice(mix)
+            # Where the row breaks for a cross aisle, and how far along it
+            # changes what it holds: both staggered, so a big shop is not a
+            # grid of identical squares.
+            cross_at = CROSS_AISLE_EVERY + rng.randint(-2, 3)
+            change_at = rng.randint(4, 9)
             d = 4
             since_cross = 0
+            since_change = 0
             while d < frame.depth - 2:
-                if since_cross >= CROSS_AISLE_EVERY:
+                if since_cross >= cross_at:
                     d += 2
                     since_cross = 0
+                    cross_at = CROSS_AISLE_EVERY + rng.randint(-2, 3)
                     continue
+                if row_role != "bookcases" and since_change >= change_at:
+                    role = rng.choice(mix)
+                    since_change = 0
+                    change_at = rng.randint(4, 9)
                 x, y = frame.xy(a2, d)
                 # A piece in a north-south row is anchored at its north end;
                 # walking from a south front, step to that end first.
@@ -303,6 +338,7 @@ def furnish_store(plan, idx: int, room, rng: random.Random, door_tiles: set,
                 if put(role, x, y, L._facing(role, orient)):
                     d += size
                     since_cross += size
+                    since_change += size
                 else:
                     d += 1
 

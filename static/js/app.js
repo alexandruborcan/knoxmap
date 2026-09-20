@@ -1145,6 +1145,7 @@ function renderCensus(pop) {
   tiles.innerHTML = `
     ${fx.tile(pop.residents, '', 'residents')}
     ${fx.tile(pop.daytime_occupants, '', 'at work or school')}
+    ${fx.tile(pop.on_the_street || 0, '', 'out on the street')}
     ${fx.tile(pop.zombie_estimate, '', 'zombies, roughly')}
     ${fx.tile(pop.share_with_zombies * 100, '%', 'of the map has zombies', 0)}`;
   fx.countUp(tiles);

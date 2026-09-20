@@ -394,6 +394,55 @@ KnoxMap is not made, endorsed or supported by The Indie Stone.
         f.write(text)
 
 
+# A map of this many compiled cells or more needs more memory than Project
+# Zomboid gives itself by default. One player watched a big map "seize and
+# start to visually glitch out" before the game fell over, and found the
+# game's own maximum had been left at 3 GB; nothing had told them to look.
+BIG_MAP_CELLS = 40
+
+
+def write_how_to_play(mod_root: str, name: str, cells: int, big: bool) -> None:
+    """A short note beside the mod: how to turn it on, and what a big map
+    needs from the game."""
+    lines = [
+        f"{name}",
+        "A Project Zomboid map made with KnoxMap.",
+        "",
+        "Turning it on",
+        "-------------",
+        "1. Start Project Zomboid.",
+        "2. Main menu -> Mods, tick this mod, and restart the game if it asks.",
+        "3. New game -> the map appears as its own starting region.",
+        "",
+        "If the map is not in the list, close the game completely and start it",
+        "again: Build 42 only reads the mods folder at startup.",
+        "",
+        "In the game",
+        "-----------",
+        "Right-click the ground for \"Reset loot\" to refill the containers in a",
+        "building, or everything within 30 tiles, without starting a new save.",
+    ]
+    if big:
+        lines += [
+            "",
+            "This is a big map",
+            "-----------------",
+            f"{cells} cells. Project Zomboid gives itself 3 GB of memory by default,",
+            "which a map this size can run out of - the map tears, the game slows",
+            "and then it closes. To raise it, edit ProjectZomboid64.json in the",
+            "game folder (Steam -> right-click Project Zomboid -> Manage -> Browse)",
+            "and change the line",
+            "",
+            "    \"-Xmx3g\",",
+            "",
+            "to a third or so of the memory your PC has - \"-Xmx8g\" on a 16 GB",
+            "machine, \"-Xmx16g\" on 32 GB. Steam replaces that file when it",
+            "verifies the game's files, so check it again after an update.",
+        ]
+    with open(os.path.join(mod_root, "HOW TO PLAY.txt"), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 def folder_name(title: str, fallback: str) -> str:
     """A map folder name the game and Windows both accept, from a display title.
 
@@ -451,7 +500,19 @@ def package(project_dir: str, name: str, mod_id: str,
     if os.path.exists(xml_map):
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from knoxbuild.worldmap_bin import write_bin
-        n_map_features = write_bin(xml_map, xml_map + ".bin")
+        try:
+            n_map_features = write_bin(xml_map, xml_map + ".bin")
+        except Exception:                       # noqa: BLE001 - see below
+            n_map_features = 0
+        # Build 42's XML reader cannot read its own format: it reads twice as
+        # far as it wrote and throws IndexOutOfBounds on every outline, which
+        # is what filled players' console.txt and took the in-game map down
+        # with it. The game only falls back to the XML when there is no
+        # binary, so the XML never ships without one.
+        if not n_map_features:
+            os.remove(xml_map)
+            if os.path.exists(xml_map + ".bin"):
+                os.remove(xml_map + ".bin")
 
     desc = description or f"{name}, generated from real-world map data with KnoxMap by euclid80tr."
     # OpenStreetMap's licence (ODbL) requires attribution wherever the map is
@@ -504,6 +565,9 @@ def package(project_dir: str, name: str, mod_id: str,
             f.write(info)
 
     write_attribution(project_dir, mod_root, name)
+    n_cells = sum(1 for c in cells if c.endswith(".lotheader"))
+    big_map = n_cells >= BIG_MAP_CELLS
+    write_how_to_play(mod_root, name, n_cells, big_map)
     n_pois = write_spawn_selector(project_dir, mod_root, mod_id, name)
     reset_loot = write_reset_loot(mod_root)
     extra_names = [os.path.basename(e) for e in extras]
@@ -517,7 +581,10 @@ def package(project_dir: str, name: str, mod_id: str,
     extra_names.append(f"Spawn Selector support ({n_pois} places)")
     if reset_loot:
         extra_names.append("Reset loot menu")
-    return mod_root, sum(1 for c in cells if c.endswith(".lotheader")), extra_names
+    if big_map:
+        extra_names.append("HOW TO PLAY.txt - a map this size needs more memory "
+                           "than the game gives itself; the file says how")
+    return mod_root, n_cells, extra_names
 
 
 def main(argv: list[str] | None = None) -> int:

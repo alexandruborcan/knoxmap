@@ -1228,8 +1228,58 @@ def _exterior_door(plan: Plan, rng: random.Random,
             return (len(wall) >= 3, side == (street or "S"), far, len(wall))
 
         side, wall = max(runs, key=score)
-        plan.doors.append(wall[len(wall) // 2])
+        front = wall[len(wall) // 2]
+        plan.doors.append(front)
+        _more_ways_in(plan, front)
         return
+
+
+# One door per this much exterior wall, in tiles.
+#
+# A building got exactly one, wherever it landed. On a house that is a front
+# door; on a church, a works or a parade of shops a hundred metres round, it
+# is one door somewhere along the back, and everyone who walked up to the
+# front reported a building with no door anywhere. Real buildings that size
+# have several ways in, so these do - about one every thirty-odd metres,
+# which is near enough that you meet one whichever side you arrive from.
+DOOR_EVERY_TILES = 34
+MAX_EXTERIOR_DOORS = 6
+# Two doors closer together than this are one entrance, not two.
+DOORS_APART_TILES = 12
+# Nobody's front door opens into these, and a second one need not either.
+PRIVATE_ROOMS = {"bathroom", "bedroom", "kidsbedroom", "closet", "cells"}
+
+
+def _more_ways_in(plan: Plan, front: tuple[int, int, str]) -> None:
+    """Extra doors round a big building, spread along its walls.
+
+    `front` is the door already hung, which the rest keep away from.
+    """
+    if plan.kind in (None, "house"):
+        return          # a house has its front door and its back door
+    walls: list[tuple[int, list]] = []
+    for idx in range(1, len(plan.rooms) + 1):
+        room = plan.rooms[idx - 1]
+        if room.is_shaft:
+            continue
+        private = room.kind in PRIVATE_ROOMS
+        for _side, wall in _outside_runs(plan, idx):
+            if len(wall) >= 3:
+                walls.append((len(wall) - (1000 if private else 0), wall))
+    perimeter = sum(len(wall) for _rank, wall in walls)
+    want = min(MAX_EXTERIOR_DOORS, perimeter // DOOR_EVERY_TILES)
+    placed = [(front[0], front[1])]
+    # Longest walls first, and never twice on one stretch or beside a door
+    # already hung. Rooms nobody enters a building through come last.
+    for _rank, wall in sorted(walls, key=lambda r: -r[0]):
+        if len(placed) >= want:
+            break
+        spot = wall[len(wall) // 2]
+        if any(abs(spot[0] - px) + abs(spot[1] - py) < DOORS_APART_TILES
+               for px, py in placed):
+            continue
+        plan.doors.append(spot)
+        placed.append((spot[0], spot[1]))
 
 
 OPPOSITE_SIDE = {"N": "S", "S": "N", "W": "E", "E": "W"}
@@ -1600,6 +1650,12 @@ def _cells_for(role: str, x: int, y: int, orient: str) -> list[tuple[int, int]]:
 
 
 SWITCH = "switch"
+# One light switch per this much floor, in tiles, and never more than this
+# many in a room. A room of a hundred tiles keeps its single switch; a
+# supermarket's sales floor gets one about every eight metres.
+LIGHT_EVERY_TILES = 110
+MAX_SWITCHES = 8
+SWITCHES_APART = 7
 # Things fixed to a wall rather than standing against it. A painting has only
 # north and west sprites, so on a south or east wall the fallback drew it on
 # the far edge of the tile, hanging in mid-air a tile into the room; shelves
@@ -1873,11 +1929,26 @@ def _furnish(plan: Plan, rng: random.Random,
             slots,
             key=lambda s: min((abs(s[0] - dx) + abs(s[1] - dy) for dx, dy in mine),
                               default=0) + (4 if on_facade(s) else 0))
+        # The game hangs one ceiling light off each switch, and that light
+        # only reaches so far, so a sales floor or a warehouse lit by the one
+        # switch beside its door was dark everywhere else - "lighting seems
+        # somewhat broken". A big room gets a switch every so often, spread
+        # out along its walls, the way a real shop is wired.
+        want_switches = max(1, min(MAX_SWITCHES, r.area // LIGHT_EVERY_TILES))
+        lit: list[tuple[int, int]] = []
         for x, y, facing in by_reach:
+            if len(lit) >= want_switches:
+                break
             if (x, y) in mine and _wall_edge(x, y, facing) in door_edges:
                 continue
+            if lit and min(abs(x - lx) + abs(y - ly) for lx, ly in lit) < SWITCHES_APART:
+                continue
             if hang(SWITCH, x, y, facing):
-                break
+                lit.append((x, y))
+        if not lit:
+            for x, y, facing in by_reach:
+                if hang(SWITCH, x, y, facing):
+                    break
 
         # Nothing else goes in the stair hall or corridor: a flat's front door
         # and the only way past the flight both run through it, and one

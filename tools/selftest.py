@@ -169,6 +169,9 @@ def check_1_3_6(check, out: str, tbx: list[str], pzw_text: str, log: str) -> Non
     """What 1.3.6 added: rows cut into units, rooms the game can fill, police
     stations and libraries, graves, army bases, and a place in the world of
     this map's own."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from audit_layouts import door_pair
+
     from knoxbuild import layout
     from knoxbuild.world import WORLD_ORIGIN_CELLS, choose_origin
 
@@ -241,6 +244,41 @@ def check_1_3_6(check, out: str, tbx: list[str], pzw_text: str, log: str) -> Non
     check(grown >= 30 and field == 0,
           f"open country grows trees and scrub, farmland stays a field ({grown})")
 
+    # A building big enough to walk round has more than one way in. One door
+    # on a hundred metres of wall was "some buildings generate without any
+    # door": whichever side you arrived from, there was none.
+    from knoxbuild.settings import Settings as _S2
+
+    def ways_in(kind, w, h):
+        plan = layout.build_building(w, h, commercial=True, seed=6, kind=kind,
+                                     levels=1, settings=_S2()).storeys[0]
+        return len([d for d in plan.doors
+                    if door_pair(plan, d) is None or 0 in (door_pair(plan, d) or (0,))])
+
+    check(ways_in("church", 30, 50) >= 3 and ways_in("industrial", 70, 50) >= 3,
+          "a big building has more than one way in")
+    check(ways_in(None, 12, 9) <= 2, "a house still has its front and back door")
+
+    # A big room is lit at both ends: the game hangs one ceiling light per
+    # switch, and one switch left a sales floor dark.
+    mall = layout.build_building(46, 34, commercial=True, seed=11, kind="shop",
+                                 levels=1, settings=_S2(), street="S",
+                                 uses=[("departmentstore", "storage")]).storeys[0]
+    per_room = {}
+    for role, x, y, _o in mall.furniture:
+        if role == "switch":
+            per_room[mall.grid[y][x]] = per_room.get(mall.grid[y][x], 0) + 1
+    check(max(per_room.values(), default=0) >= 4,
+          f"a big room has several light switches ({max(per_room.values(), default=0)})")
+
+    # And its aisles are not forty copies of one shelf.
+    from collections import Counter as _Counter
+    aisle = _Counter(role for role, _x, _y, _o in mall.furniture
+                     if role in ("clothes_rack", "clothes_rack_small",
+                                 "shop_shelf_wood", "shop_display"))
+    check(len(aisle) >= 3,
+          f"a mall's rows are a mix, not one piece repeated ({dict(aisle)})")
+
     # The first map on a PC keeps the old origin; the next one stands clear.
     origin = re.search(r'<worldOrigin origin="(\d+),(\d+)"', pzw_text)
     check(origin and (int(origin.group(1)), int(origin.group(2))) == WORLD_ORIGIN_CELLS,
@@ -251,6 +289,36 @@ def check_1_3_6(check, out: str, tbx: list[str], pzw_text: str, log: str) -> Non
     check(picked[0] >= WORLD_ORIGIN_CELLS[0] + 3,
           f"a second map is built clear of the first (cell {picked[0]},{picked[1]})")
     shutil.rmtree(beside, ignore_errors=True)
+
+
+def check_street_zombies(check) -> None:
+    """Zombies where the streets are, not only inside the buildings: a town
+    mapped without its houses used to come out empty."""
+    import numpy as np
+
+    from knoxbuild.population import CHUNK, build_spawn_map
+    from knoxbuild.settings import Settings
+
+    work = tempfile.mkdtemp(prefix="knoxmap-streets-")
+    try:
+        w = h = CHUNK * 30
+        ground = Image.new("RGB", (w, h), C.DARK_GRASS)
+        pen = ground.load()
+        for y in range(h // 2 - 4, h // 2 + 4):      # one road across
+            for x in range(w):
+                pen[x, y] = C.MEDIUM_ASPHALT
+        path = os.path.join(work, "ground.bmp")
+        ground.save(path, format="BMP")
+        img, summary = build_spawn_map([], w, h, 1.0, path, Settings())
+        value = np.array(img)[:, :, 0]
+        on_road = value[h // 2 // CHUNK]
+        check(summary["on_the_street"] > 0 and int((value > 0).sum()) > 0,
+              f"a town with no buildings still has zombies on its streets "
+              f"({summary['on_the_street']} people)")
+        check(int(on_road.sum()) > int(value[0].sum()),
+              "the zombies are on the road, not out in the fields")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def check_repair(check, out: str) -> None:
@@ -629,6 +697,7 @@ def main(argv: list[str]) -> int:
         check(stalls >= 40, f"car parks and drives have parking stalls ({stalls})")
         check(len(school) >= 1, "the school has classrooms")
         check_1_3_6(check, out, tbx, pzw_text, log.getvalue())
+        check_street_zombies(check)
         texts = [open(p, encoding="utf-8").read() for p in tbx]
         windows = {m for t in texts for m in re.findall(r'category="windows">\s*<tile enum="West" tile="(\w+)"', t)}
         check(len(windows) >= 3, f"window styles vary ({len(windows)})")
@@ -850,6 +919,12 @@ def main(argv: list[str]) -> int:
               and all(-32768 <= px <= 32767 for feats in paper.values()
                       for _t, rings, _p in feats for ring in rings for px, _ in ring),
               f"the paper map is written as Build 42's worldmap.xml.bin ({len(paper)} cells)")
+        # Build 42's XML reader throws on every outline of its own format, so
+        # the XML only ever goes in beside a binary the game reads instead.
+        map_folder = os.path.dirname(bin_map)
+        check(not os.path.exists(os.path.join(map_folder, "worldmap.xml"))
+              or os.path.exists(bin_map),
+              "the paper map's XML never ships without its binary")
         # Walk it the way the game does - one point buffer per cell, each
         # outline remembering where it starts as a signed 16-bit number - and
         # make sure nothing reads past the end. Reading past it is what broke

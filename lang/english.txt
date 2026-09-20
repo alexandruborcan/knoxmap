@@ -114,6 +114,7 @@ Open in WorldEd = Open in WorldEd
 OpenStreetMap lists = OpenStreetMap lists
 Or do it yourself in WorldEd = Or do it yourself in WorldEd
 Other drives or folders (separated by ;) = Other drives or folders (separated by ;)
+out on the street = out on the street
 Population = Population
 Preview = Preview
 Preview PNG = Preview PNG

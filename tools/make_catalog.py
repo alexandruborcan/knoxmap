@@ -113,6 +113,48 @@ def _tile_props(body: str) -> dict:
     return dict(re.findall(r"^[ \t]*(\w+)[ \t]*=[ \t]*(.*?)[ \t]*$", body, re.M))
 
 
+# Where the extracted tile artwork is, once main() knows. A sheet often has
+# fewer pictures in it than its declared grid has cells, and the leftovers are
+# transparent: a tile named for one of those draws as a question mark in game
+# (CellLoader: missing tile) or as nothing at all. Every tile taken here is
+# checked against the artwork first.
+TILES_2X: str | None = None
+_SHEET_ALPHA: dict = {}
+
+
+def _blank(tile: str) -> bool:
+    """Whether `sheet_012` is an empty square in its sheet. False when the
+    artwork is not on this PC, so the catalog still builds without the game."""
+    import re as _re
+
+    if not TILES_2X:
+        return False
+    m = _re.fullmatch(r"(.+)_(\d+)", tile)
+    if not m:
+        return False
+    sheet, idx = m.group(1), int(m.group(2))
+    if sheet not in _SHEET_ALPHA:
+        _SHEET_ALPHA[sheet] = None
+        try:
+            import numpy as _np
+            from PIL import Image as _Image
+
+            path = os.path.join(TILES_2X, sheet + ".png")
+            if os.path.exists(path):
+                with _Image.open(path) as img:
+                    _SHEET_ALPHA[sheet] = _np.asarray(img.convert("RGBA"))[:, :, 3]
+        except Exception:                       # noqa: BLE001 - no PIL, no check
+            pass
+    alpha = _SHEET_ALPHA[sheet]
+    if alpha is None:
+        return False
+    cols = max(1, alpha.shape[1] // 128)
+    th = 256
+    r, c = divmod(idx, cols)
+    cell = alpha[r * th:(r + 1) * th, c * 128:(c + 1) * 128]
+    return cell.size == 0 or not cell.any()
+
+
 def erika_roles(furniture: dict, layers: dict) -> dict:
     """Pieces from Erika's Tiles, added to `furniture` as roles, by group:
     "art" (paintings, posters, mirrors), "plants", "shop_ads" (posters for
@@ -168,6 +210,8 @@ def erika_roles(furniture: dict, layers: dict) -> dict:
             pieces.setdefault(key, {})[FACING_TO_ORIENT[facing]] = f"{sheet}_{n:03d}"
         for key, by_orient in pieces.items():
             kind = key[0]
+            if any(_blank(t) for t in by_orient.values()):
+                continue                        # blank squares in the sheet
             prefix = {"art": "erika_art", "plants": "erika_plant", "shop_ads": "erika_ad",
                       "vending": "erika_vending", "shelves": "erika_shelves"}[kind]
             role = f"{prefix}_{len(out[kind])}"
@@ -202,7 +246,11 @@ def erika_roles(furniture: dict, layers: dict) -> dict:
 
 
 def main(argv: list[str]) -> int:
+    global TILES_2X
     cfg_dir, out_path = argv[1], argv[2]
+    TILES_2X = os.path.join(os.path.dirname(os.path.abspath(cfg_dir)), "Tiles", "2x")
+    if not os.path.isdir(TILES_2X):
+        TILES_2X = None
     entries = parse_tile_entries(os.path.join(cfg_dir, "BuildingTemplates.txt"))
     groups = parse_furniture(os.path.join(cfg_dir, "BuildingFurniture.txt"))
     room_colors = parse_room_names(os.path.join(cfg_dir, "RoomNames.txt"))

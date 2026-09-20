@@ -1141,7 +1141,8 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
           f"{paper_map['map_cells']} cells, {paper_map['streets']} named streets, "
           f"{paper_map['labels']} labels")
     print(f"population            : {population['residents']:,} residents, "
-          f"{population['daytime_occupants']:,} at work or school")
+          f"{population['daytime_occupants']:,} at work or school, "
+          f"{population.get('on_the_street', 0):,} out on the street")
     print(f"zombie spawn map      : {population['share_with_zombies']:.1%} of chunks "
           f"populated, peak {population['peak_value']} (cap {population['horde_cap']}), "
           f"{population['chunks_at_cap']} chunks at the cap")
