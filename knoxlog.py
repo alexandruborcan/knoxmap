@@ -143,6 +143,8 @@ def memory_status() -> tuple[int, int, int] | None:
     The last one is the address space: on a 32-bit Python it is about 2 GB
     however much memory the PC has, which is what a big map runs out of.
     """
+    if os.name != "nt":
+        return _memory_status_posix()
     try:
         import ctypes
 
@@ -157,6 +159,26 @@ def memory_status() -> tuple[int, int, int] | None:
         if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
             return int(st.total), int(st.avail), int(st.virtavail)
     except Exception:  # noqa: BLE001 - not Windows
+        pass
+    return None
+
+
+def _memory_status_posix() -> tuple[int, int, int] | None:
+    """The same three numbers from /proc/meminfo, on Linux."""
+    try:
+        values = {}
+        with open("/proc/meminfo", encoding="utf-8") as f:
+            for line in f:
+                key, _, rest = line.partition(":")
+                values[key] = int(rest.split()[0]) * 1024
+        total = values.get("MemTotal", 0)
+        free = values.get("MemAvailable", values.get("MemFree", 0))
+        if total:
+            # 64-bit address space is effectively unlimited here; a 32-bit
+            # build is capped, which is what the room figure is for.
+            room = free if sys.maxsize > 2 ** 32 else min(free, 2 ** 31)
+            return total, free, room
+    except (OSError, ValueError, IndexError):
         pass
     return None
 
@@ -322,6 +344,13 @@ def open_folder(path=None) -> bool:
             os.startfile(str(LOG_DIR))  # type: ignore[attr-defined]
             return True
         path = Path(path)
+        if os.name != "nt":
+            # No Explorer: open the folder it is in with whatever the desktop
+            # uses. Nothing is selected, which is as close as this gets.
+            folder = path if path.is_dir() else path.parent
+            opener = "open" if sys.platform == "darwin" else "xdg-open"
+            subprocess.Popen([opener, str(folder)])
+            return True
         if path.is_dir():
             os.startfile(str(path))     # type: ignore[attr-defined]
         else:

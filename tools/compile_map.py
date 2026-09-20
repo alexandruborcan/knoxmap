@@ -129,7 +129,7 @@ def compile_map(project_dir: str, batch: int = 4, exe: str | None = None,
         raise FileNotFoundError(f"No {pzw.name} — generate the buildings first.")
     exe_path = Path(exe) if exe else DEFAULT_EXE
     if not exe_path.exists():
-        raise FileNotFoundError(f"PZWorldEd_cli.exe not found at {exe_path}")
+        raise FileNotFoundError(f"PZWorldEd_cli not found at {exe_path}")
 
     clear_stale(project)
     # Whatever wrote the project, one entry past the edge of the map must not
@@ -158,7 +158,7 @@ def compile_map(project_dir: str, batch: int = 4, exe: str | None = None,
     for i, (bx, by) in enumerate(batches, start=1):
         x1 = min(bx + batch - 1, w - 1)
         y1 = min(by + batch - 1, h - 1)
-        cmd = [str(exe_path), f"--generate-map={pzw}",
+        cmd = knoxpaths.command_for(exe_path) + [f"--generate-map={pzw}",
                f"--cells={bx},{by},{x1},{y1}"]
         batch_started = time.time()
         proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",

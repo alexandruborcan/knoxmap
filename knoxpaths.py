@@ -52,23 +52,41 @@ def mapping_tools_dir() -> Path | None:
     )
 
 
-def worlded_cli() -> Path | None:
-    """The patched, headless PZWorldEd_cli.exe."""
-    override = os.environ.get("PZWORLDED_CLI")
-    if override and _exists(Path(override)):
-        return Path(override)
+def _tool(name: str, override: str) -> Path | None:
+    """One of the map tools' programs: the Windows build, or a Linux one built
+    from the same source beside it (see worlded/README.md)."""
+    chosen = os.environ.get(override)
+    if chosen and _exists(Path(chosen)):
+        return Path(chosen)
     tools = mapping_tools_dir()
-    exe = tools / "bin" / "PZWorldEd_cli.exe" if tools else None
-    return exe if exe and _exists(exe) else None
+    if not tools:
+        return None
+    for candidate in (tools / "bin" / f"{name}.exe", tools / "bin" / name):
+        if _exists(candidate):
+            return candidate
+    return None
+
+
+def worlded_cli() -> Path | None:
+    """The patched, headless map compiler (PZWorldEd_cli)."""
+    return _tool("PZWorldEd_cli", "PZWORLDED_CLI")
 
 
 def worlded_gui() -> Path | None:
-    override = os.environ.get("PZWORLDED")
-    if override and _exists(Path(override)):
-        return Path(override)
-    tools = mapping_tools_dir()
-    exe = tools / "bin" / "PZWorldEd.exe" if tools else None
-    return exe if exe and _exists(exe) else None
+    return _tool("PZWorldEd", "PZWORLDED")
+
+
+def command_for(program: Path | str) -> list[str]:
+    """How to run one of the map tools here.
+
+    They are built for Windows. Off Windows the same binaries run under Wine,
+    which every Steam-on-Linux machine already has; a Linux build of the tools
+    (no .exe) is run directly. KNOXMAP_WINE names a different Wine.
+    """
+    program = str(program)
+    if os.name != "nt" and program.lower().endswith(".exe"):
+        return [os.environ.get("KNOXMAP_WINE", "wine"), program]
+    return [program]
 
 
 def chosen_steam_folders() -> list[str]:
