@@ -1,0 +1,124 @@
+name: worlded-linux
+
+# A native Linux build of the patched map compiler, so Linux does not need
+# Wine to make a map.
+#
+# Wine works, but it is a layer nobody can see into: WorldEd dies and there is
+# nothing to read, its pipes are held open by wineserver long after it is
+# gone, and paths have to be handed over as Z: names. Upstream publishes
+# Windows binaries only, and its own BUILDING.md calls the Linux flow
+# "intended" rather than tested - so this builds it, runs it, and packages it
+# with the Qt libraries it needs, because none of that can be taken on trust.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'worlded/**'
+      - '.github/workflows/worlded-linux.yml'
+
+env:
+  # The release knoxmap_setup.py pins, and the commit worlded/README.md names.
+  COMMIT: 4e86b80c505b3d77a2fb5f5675b752da966306f6
+
+jobs:
+  build:
+    name: Build PZWorldEd_cli for Linux
+    # The oldest runner still offered: a binary built against a newer glibc
+    # will not start on a distro older than the one that built it.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Qt 5.15 and a compiler
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential patchelf \
+            qtbase5-dev qtbase5-dev-tools qttools5-dev qttools5-dev-tools \
+            libqt5svg5-dev libqt5opengl5-dev libqt5x11extras5-dev \
+            zlib1g-dev
+          qmake -v
+
+      - name: PZ Mapping Tools at the pinned commit
+        run: |
+          git clone --quiet https://github.com/Unjammer/PZ_Mapping_Tools.git src
+          git -C src checkout --quiet "$COMMIT"
+          git -C src log --oneline -1
+
+      - name: KnoxMap's headless patch
+        run: python3 worlded/patch_worlded_cli.py src
+
+      - name: Build
+        run: |
+          mkdir -p build
+          cd build
+          qmake "$GITHUB_WORKSPACE/src/WorldEd/PZWorldEd.pro" CONFIG+=release
+          make -j"$(nproc)"
+
+      - name: Find what was built
+        id: built
+        run: |
+          exe=$(find build -type f -name PZWorldEd -perm -u+x | head -1)
+          test -n "$exe" || { echo "no PZWorldEd came out of the build"; exit 1; }
+          file "$exe"
+          file "$exe" | grep -q 'ELF 64-bit.*executable' ||
+            { echo "not a 64-bit Linux executable"; exit 1; }
+          echo "exe=$exe" >> "$GITHUB_OUTPUT"
+
+      - name: It carries the headless switch
+        run: |
+          strings "${{ steps.built.outputs.exe }}" | grep -q -- '--generate-map' ||
+            { echo "the patch did not make it into the binary"; exit 1; }
+
+      - name: Package it with its libraries
+        run: |
+          exe='${{ steps.built.outputs.exe }}'
+          out=pack/PZWorldEd_cli-linux-x86_64
+          mkdir -p "$out/lib" "$out/plugins/platforms"
+          cp "$exe" "$out/PZWorldEd_cli"
+          # Every shared library it needs that is not part of the base system,
+          # so it runs on a machine with no Qt installed.
+          ldd "$out/PZWorldEd_cli" | awk '/=> \//{print $3}' |
+            grep -E 'libQt5|libicu|libpcre2-16|libdouble-conversion|libmd4c|libz\.' |
+            xargs -r -I{} cp -Lv {} "$out/lib/"
+          # Qt refuses to start without a platform plugin, even headless.
+          for plugin in libqxcb.so libqoffscreen.so libqminimal.so; do
+            found=$(find /usr/lib -name "$plugin" 2>/dev/null | head -1)
+            [ -n "$found" ] && cp -Lv "$found" "$out/plugins/platforms/"
+          done
+          ldd "$out/plugins/platforms/libqxcb.so" 2>/dev/null |
+            awk '/=> \//{print $3}' | grep -E 'libQt5|libxcb-|libxkbcommon' |
+            xargs -r -I{} cp -Lv {} "$out/lib/" || true
+          # Found beside the program rather than wherever the distro keeps it.
+          patchelf --set-rpath '$ORIGIN/lib' "$out/PZWorldEd_cli"
+          for lib in "$out"/lib/*.so*; do patchelf --set-rpath '$ORIGIN' "$lib" || true; done
+          printf 'QT_QPA_PLATFORM_PLUGIN_PATH is set by KnoxMap.\n' > "$out/README.txt"
+          du -sh "$out"
+
+      - name: It runs
+        run: |
+          out=pack/PZWorldEd_cli-linux-x86_64
+          export QT_QPA_PLATFORM=offscreen
+          export QT_QPA_PLATFORM_PLUGIN_PATH="$PWD/$out/plugins/platforms"
+          # No project to open: it must say so and exit, not hang or crash.
+          set +e
+          timeout 120 "./$out/PZWorldEd_cli" --generate-map=/nonexistent.pzw
+          code=$?
+          set -e
+          echo "exit $code"
+          [ "$code" -lt 128 ] ||
+            { echo "it was killed by a signal - it did not start cleanly"; exit 1; }
+
+      - name: Tarball
+        run: |
+          cd pack
+          tar czf PZWorldEd_cli-linux-x86_64.tar.gz PZWorldEd_cli-linux-x86_64
+          sha256sum PZWorldEd_cli-linux-x86_64.tar.gz | tee SHA256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PZWorldEd_cli-linux-x86_64
+          path: |
+            pack/PZWorldEd_cli-linux-x86_64.tar.gz
+            pack/SHA256
+          if-no-files-found: error
