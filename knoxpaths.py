@@ -114,6 +114,41 @@ def venv_python(windowless: bool = False) -> Path:
     return Path(sys.executable)
 
 
+_WINE_PATHS: dict[str, str] = {}
+
+
+def wine_path(path: Path | str) -> str:
+    """A path as the map tools see it, which off Windows is through Wine.
+
+    The tools are Windows programs, so "/home/you/maps/town" means nothing to
+    them: Wine shows the whole filesystem as drive Z:, and that is the name
+    they can open. `winepath -w` is Wine's own answer and is used when it is
+    there; the Z: form it would have produced is the fallback.
+
+    On Windows the path is already what the tools want.
+    """
+    text = str(path)
+    if os.name == "nt":
+        return text
+    if text in _WINE_PATHS:
+        return _WINE_PATHS[text]
+    converted = ""
+    import shutil
+    import subprocess
+    tool = shutil.which("winepath")
+    if tool:
+        try:
+            done = subprocess.run([tool, "-w", text], capture_output=True, text=True,
+                                  timeout=30, check=False)
+            converted = done.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            converted = ""
+    if not converted:
+        converted = "Z:" + os.path.abspath(text).replace("/", "\\")
+    _WINE_PATHS[text] = converted
+    return converted
+
+
 def setup_command() -> str:
     """What to tell the player to run: the setup script this PC has."""
     return "Setup.bat" if os.name == "nt" else "./setup.sh"

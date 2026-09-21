@@ -72,6 +72,14 @@ def world_size(pzw: Path) -> tuple[int, int]:
     return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
 
 
+def _tool_path(path: Path) -> str:
+    """A file as the map tools name it: forward slashes on Windows, a Wine
+    path off it."""
+    if os.name == "nt":
+        return path.as_posix()
+    return knoxpaths.wine_path(path)
+
+
 def assign_converted_maps(pzw: Path) -> int:
     """Point every cell that has a converted .tmx at it. Returns how many.
 
@@ -85,12 +93,15 @@ def assign_converted_maps(pzw: Path) -> int:
     text = pzw.read_text(encoding="utf-8", errors="replace")
     origin = re.search(r'<worldOrigin origin="(-?\d+),(-?\d+)"', text)
     bmp = re.search(r'<bmp path="([^"]+)"', text)
-    tmx_dir = re.search(r'<tmxexportdir path="([^"]+)"', text)
-    if not (origin and bmp and tmx_dir):
+    if not (origin and bmp):
         return 0
     ox, oy = int(origin.group(1)), int(origin.group(2))
     base = Path(bmp.group(1)).stem
-    folder = Path(tmx_dir.group(1))
+    # The converted maps sit in the project's own tmx folder. The path the
+    # .pzw carries is the one the tools read, which under Wine is a Z: name
+    # that means nothing here - so the file is looked for by its real name
+    # and written back by the tools' one (knoxbuild/world.py _tool_path).
+    folder = pzw.parent / "tmx"
     count = 0
 
     def fill(m):
@@ -100,7 +111,7 @@ def assign_converted_maps(pzw: Path) -> int:
         if not path.exists():
             return m.group(0)
         count += 1
-        return f'<cell x="{x}" y="{y}" map="{path.as_posix()}"'
+        return f'<cell x="{x}" y="{y}" map="{_tool_path(path)}"'
 
     new = re.sub(r'<cell x="(\d+)" y="(\d+)" map=""', fill, text)
     if count:
@@ -194,8 +205,9 @@ def compile_map(project_dir: str, batch: int = 4, exe: str | None = None,
     for i, (bx, by) in enumerate(batches, start=1):
         x1 = min(bx + batch - 1, w - 1)
         y1 = min(by + batch - 1, h - 1)
-        cmd = knoxpaths.command_for(exe_path) + [f"--generate-map={pzw}",
-               f"--cells={bx},{by},{x1},{y1}"]
+        cmd = knoxpaths.command_for(exe_path) + [
+            f"--generate-map={knoxpaths.wine_path(pzw)}",
+            f"--cells={bx},{by},{x1},{y1}"]
         batch_started = time.time()
         knoxstop.check(should_stop, "the compile")
         proc = _run_batch(cmd, should_stop, batch_started)

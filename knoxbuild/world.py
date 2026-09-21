@@ -209,6 +209,15 @@ class Placement:
         return self.tile_y % CELL_SIZE
 
 
+def _tool_path(path: str) -> str:
+    """A folder as the map tools read it: forward slashes on Windows, and a
+    Wine path everywhere else (knoxpaths.wine_path)."""
+    if os.name == "nt":
+        return path.replace("\\", "/")
+    import knoxpaths
+    return knoxpaths.wine_path(path)
+
+
 def render_pzw(cells_x: int, cells_y: int, bmp_name: str,
                placements: list[Placement], map_name: str = "",
                project_dir: str = "",
@@ -236,9 +245,11 @@ def render_pzw(cells_x: int, cells_y: int, bmp_name: str,
     # Absolute paths: WorldEd resolves a relative export dir against its own
     # working directory, not the project, so a relative "tmx" silently writes
     # nowhere useful when it is launched from its bin folder.
+    # ...and off Windows they are what Wine calls them, because WorldEd is a
+    # Windows program and "/home/you/maps" is not a path it can open.
     base = os.path.abspath(project_dir) if project_dir else ""
-    tmx_dir = os.path.join(base, "tmx").replace("\\", "/") if base else "tmx"
-    lots_dir = os.path.join(base, "lots").replace("\\", "/") if base else "lots"
+    tmx_dir = _tool_path(os.path.join(base, "tmx")) if base else "tmx"
+    lots_dir = _tool_path(os.path.join(base, "lots")) if base else "lots"
 
     out += [
         " <BMPToTMX>",
@@ -303,9 +314,10 @@ def render_pzw(cells_x: int, cells_y: int, bmp_name: str,
         if not base:
             return ""
         ox, oy = origin()
-        path = os.path.join(tmx_dir, f"{bmp_base}_"
-                            f"{ox + cx}_{oy + cy}.tmx")
-        return path.replace("\\", "/") if os.path.exists(path) else ""
+        # Checked on disk by its real name, written in the .pzw by the name
+        # the tools use - the two differ under Wine.
+        here = os.path.join(base, "tmx", f"{bmp_base}_{ox + cx}_{oy + cy}.tmx")
+        return _tool_path(here) if os.path.exists(here) else ""
 
     # Every cell in the grid, not just the ones holding something: Generate Lots
     # needs a map on each cell it is asked to export.

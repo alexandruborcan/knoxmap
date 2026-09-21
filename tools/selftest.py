@@ -407,6 +407,37 @@ def check_portable(check) -> None:
     check(windows or not knoxpaths.wine() or knoxpaths.tools_runnable(),
           "with Wine on the path, the map tools count as runnable")
 
+    # The project file the map tools read. Off Windows they are Windows
+    # programs under Wine, which shows the filesystem as drive Z:, so what
+    # is written in the .pzw is not what Python opens.
+    import compile_map as compiler
+    from knoxbuild.world import Placement, render_pzw
+
+    work = tempfile.mkdtemp(prefix="knoxmap-tools-")
+    try:
+        project = Path(work) / "town"
+        (project / "tmx").mkdir(parents=True)
+        (project / "town.bmp").write_bytes(b"")
+        pzw = project / "town.pzw"
+        pzw.write_text(render_pzw(1, 1, "town.bmp", [Placement("buildings/a.tbx", 0, 0, 4, 4)],
+                                  "town", project_dir=str(project)), encoding="utf-8")
+        told = re.search(r'<tmxexportdir path="([^"]+)"', pzw.read_text(encoding="utf-8"))
+        check(bool(told) and (told.group(1).startswith(("Z:", "/")) if not windows
+                              else ":" in told.group(1)),
+              f"the export folder is written as the tools read it ({told.group(1)[:24]}…)")
+        # The cell is empty until the bitmap has been converted; once the
+        # .tmx is there it is matched by its real name, whatever the .pzw
+        # calls the folder it is in.
+        check('map=""' in pzw.read_text(encoding="utf-8"),
+              "a cell with nothing converted for it yet is left empty")
+        (project / "tmx" / "town_70_0.tmx").write_text("<map/>", encoding="utf-8")
+        assigned = compiler.assign_converted_maps(pzw)
+        after = pzw.read_text(encoding="utf-8")
+        check(assigned == 1 and 'map=""' not in after,
+              "a converted cell is found on disk and written into the project")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
     # The launchers must keep LF, or /bin/sh chokes on the carriage returns.
     root = Path(__file__).resolve().parent.parent
     for name in ("setup.sh", "knoxmap.sh"):
