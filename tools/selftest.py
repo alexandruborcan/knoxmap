@@ -884,6 +884,31 @@ def main(argv: list[str]) -> int:
         else:
             check(not any("_erika_" in t for t in texts), "no mod tiles without Erika's Tiles")
 
+        # A window is a frame and glass with nothing behind it: the hole is a
+        # tile of the wall's own, one per window style. A wall entry that
+        # names only the first leaves every other window with no wall at all.
+        from knoxbuild import catalog as KC2
+        walls = []
+
+        def _walls(node):
+            if isinstance(node, dict):
+                if str(node.get("category", "")).endswith("_walls"):
+                    walls.append(node)
+                for v in node.values():
+                    _walls(v)
+            elif isinstance(node, (list, tuple)):
+                for v in node:
+                    _walls(v)
+
+        _walls([KC2.TILE_ENTRIES, KC2.HOUSE_STYLES, KC2.SPECIAL_STYLES,
+                getattr(KC2, "SPECIAL_STYLE_VARIANTS", {}),
+                getattr(KC2, "ERIKA_STOREFRONTS", [])])
+        holes = [next(iter(w["tiles"].values()), "?") for w in walls
+                 if "WestWindow1" not in w["tiles"] or "NorthWindow1" not in w["tiles"]]
+        check(walls and not holes,
+              f"every wall has a cut-out for every window style ({len(walls)} walls"
+              + (f", {len(holes)} without: {holes[:3]}" if holes else "") + ")")
+
         print("compile")
         from compile_map import clear_stale
         stale = os.path.join(out, "lots")

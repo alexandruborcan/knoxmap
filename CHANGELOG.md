@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.3.9
+
+- **Windows with no wall behind them.** A window in Project Zomboid is a
+  frame and a pane of glass with nothing behind it: the hole it sits in is a
+  tile of the wall's own, and there is one per window style. The wall lists
+  KnoxMap was building named only the first, so every window that used any
+  other style had no wall at all - you could see straight through the
+  building, and walk through it.
+
+  It showed up on the north and west face of every building and nowhere else,
+  which is what made it look random: those are the two sides BuildingEd walls
+  with the room's *interior* wall, and the interior wall lists were the ones
+  missing their cut-outs. Compiled cells of a test town had 62 of 192
+  windowed squares with no wall on them; now none of them do.
+
+  Every wall in the catalogue now carries a cut-out for every window style,
+  taken from the editor's own list, and falls back to the wall's single
+  opening where the editor has no list either. Existing maps are rebuilt the
+  next time you press Build.
+
 ## 1.3.8
 
 - **`KnoxMap.exe`.** Windows downloads now carry a launcher you double-click

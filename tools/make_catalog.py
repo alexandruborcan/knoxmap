@@ -236,6 +236,11 @@ def erika_roles(furniture: dict, layers: dict) -> dict:
                      "NorthWest": f"{sheet}_{base + 2:03d}", "SouthEast": f"{sheet}_{base + 3:03d}",
                      "WestWindow": f"{sheet}_{base:03d}", "NorthWindow": f"{sheet}_{base + 1:03d}",
                      "WestDoor": f"{sheet}_004", "NorthDoor": f"{sheet}_005"}
+            # A cut-out for every window style, or a window in the glass has
+            # no wall behind it at all. The glass is the same either way.
+            for n in range(1, 20):
+                tiles[f"WestWindow{n}"] = tiles["WestWindow"]
+                tiles[f"NorthWindow{n}"] = tiles["NorthWindow"]
             out["storefronts"].append([{"category": "exterior_walls", "tiles": tiles},
                                        {"category": "interior_walls", "tiles": dict(tiles)},
                                        doors])
@@ -302,14 +307,56 @@ def main(argv: list[str]) -> int:
                 return {"category": category, "tiles": tiles}
         raise SystemExit(f"ERROR: no {category} {anchor!r} in BuildingTiles.txt.")
 
+    # BuildingEd draws a window as a frame and glass with nothing behind it:
+    # the hole in the wall is the wall's own cut-out tile, one per window
+    # style - WestWindow for the first, WestWindow1..19 for the rest. A wall
+    # entry that names only the first leaves every other window standing in
+    # mid-air, which is what happened on the north and west face of every
+    # building, the two sides BuildingEd walls with the room's interior wall.
+    # BuildingTemplates.txt names only the first; BuildingTiles.txt has them
+    # all, so a wall taken from the templates is filled in from there.
+    ALT_WINDOWS = 19
+
+    def bt_lookup(category: str, anchor: str) -> dict | None:
+        """bt_entry, but nothing rather than a hard stop when it is not there."""
+        try:
+            return bt_entry(category, anchor)
+        except (SystemExit, ValueError):
+            return None
+
+    def with_cutouts(entry: dict | None) -> dict | None:
+        """A wall entry that has a cut-out for every window style."""
+        if not entry or not entry.get("category", "").endswith("_walls"):
+            return entry
+        tiles = dict(entry["tiles"])
+        if "WestWindow1" in tiles:
+            return entry
+        anchor = next(iter(tiles.values()), None)
+        full = bt_lookup(entry["category"], anchor) if anchor else None
+        if full:
+            tiles = dict(full["tiles"])
+            if "WestWindow1" in tiles:
+                return {"category": entry["category"], "tiles": tiles}
+        # The editor's list has no alternates for this wall either - a shop
+        # front, or one of the sheets that carries a single opening. Every
+        # window then opens the same one, which is wrong by a few pixels and
+        # right by a whole wall.
+        for side in ("West", "North"):
+            plain = tiles.get(f"{side}Window") or tiles.get(side)
+            if plain:
+                for n in range(1, ALT_WINDOWS + 1):
+                    tiles[f"{side}Window{n}"] = plain
+        return {"category": entry["category"], "tiles": tiles}
+
     def wall_entry(anchor: str) -> dict:
         """An exterior wall from the templates, or the editor's full list."""
         for e in entries:
             if e.get("category") == "exterior_walls":
                 vals = list(tile_keys(e).values())
                 if vals and vals[0] == anchor:
-                    return {"category": "exterior_walls", "tiles": tile_keys(e)}
-        return bt_entry("exterior_walls", anchor)
+                    return with_cutouts({"category": "exterior_walls",
+                                         "tiles": tile_keys(e)})
+        return with_cutouts(bt_entry("exterior_walls", anchor))
 
     def caps_for(wall: str, fallback: str | None) -> dict | None:
         """The gable-end set the editor pairs with this exterior wall: each of
@@ -374,7 +421,7 @@ def main(argv: list[str]) -> int:
         ("ceiling", "ceilings_01_000"),
         ("interior_wall_trim", "walls_interior_detailing_01_004"),
     ]
-    tile_entries = [pick(cat, anchor) for cat, anchor in WANTED]
+    tile_entries = [with_cutouts(pick(cat, anchor)) for cat, anchor in WANTED]
 
     ROLES = {
         "bed": "furniture_bedding_01_002",
@@ -642,7 +689,7 @@ def main(argv: list[str]) -> int:
         house_styles.append({
             "name": style_name,
             "exterior": wall_entry(ext),
-            "interior": pick("interior_walls", inte),
+            "interior": with_cutouts(pick("interior_walls", inte)),
             "window": window(window_name),
             "curtains": curtains(curtain_name),
             "roof": roof(*HOUSE_ROOFS[style_name]),
@@ -739,8 +786,8 @@ def main(argv: list[str]) -> int:
         by_height = SPECIAL_WINDOWS[kind]
         style = {
             "name": kind,
-            "exterior": pick("exterior_walls", ext),
-            "interior": pick("interior_walls", inte),
+            "exterior": with_cutouts(pick("exterior_walls", ext)),
+            "interior": with_cutouts(pick("interior_walls", inte)),
             "floor": pick("floors", floor) if floor else None,
             "window": window(by_height[0][1]),
             "curtains": curtains(by_height[0][2]),

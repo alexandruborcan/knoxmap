@@ -29,11 +29,12 @@ CHANGED_IN = {
     # 1.3.6: houses where the map has only an address, trees and scrub over
     # open country, military sites read from military=* as well as landuse.
     "generate": "1.3.6",
-    # 1.3.6: rows of shops cut into their units, rooms small enough for the
-    # game to fill every container in them, police stations, libraries and
-    # fire stations, headstones in the churchyards, a place of its own in the
-    # world so two maps can be installed at once.
-    "build": "1.3.6",
+    # 1.3.9: every wall carries a cut-out for every window style, so a window
+    # has a wall behind it. 1.3.6: rows of shops cut into their units, rooms
+    # small enough for the game to fill every container in them, police
+    # stations, libraries and fire stations, headstones in the churchyards, a
+    # place of its own in the world so two maps can be installed at once.
+    "build": "1.3.9",
     # 1.3.1: the project is repaired before compiling.
     "compile": "1.3.1",
     # 1.3.6: the old map's cells are cleared out before the new ones go in.
