@@ -96,24 +96,19 @@ def read_squares(pack: str, names: list[str], lo: int, hi: int,
     return out
 
 
-def main(argv: list[str]) -> int:
-    args = [a for a in argv[1:] if not a.startswith("--")]
-    if len(args) < 6:
-        print(__doc__)
-        return 2
-    opts = {a.split("=")[0]: a.split("=", 1)[1] for a in argv[1:] if a.startswith("--") and "=" in a}
-    for i, a in enumerate(argv):
-        if a in ("--max-level", "--scale") and i + 1 < len(argv):
-            opts[a] = argv[i + 1]
-    map_dir, out_png = args[0], args[1]
-    X, Y, W, H = (int(v) for v in args[2:6])
-    max_level = int(opts["--max-level"]) if "--max-level" in opts else None
-    scale = float(opts.get("--scale", 1))
+def render(map_dir: str, X: int, Y: int, W: int, H: int,
+           max_level: int | None = None, scale: float = 1.0,
+           world: bool = False) -> Image.Image | None:
+    """An area of a compiled map, drawn the way the game draws it.
 
+    Returns the picture, or None when nothing in that area has been compiled
+    yet. The caller decides what to do with it - the command line writes it
+    out, knoxbuild/picture.py frames it.
+    """
     import knoxpaths
     from knoxbuild.world import WORLD_ORIGIN_CELLS, _project_box
 
-    if "--world" in argv:
+    if world:
         ox = oy = 0
         lots = map_dir
     else:
@@ -139,8 +134,7 @@ def main(argv: list[str]) -> int:
                 squares[(base_x + sx - wx0, base_y + sy - wy0, z)] = tiles
                 top = max(top, z)
     if not squares:
-        print("nothing compiled in that area")
-        return 1
+        return None
     if max_level is not None:
         top = min(top, max_level)
 
@@ -186,9 +180,30 @@ def main(argv: list[str]) -> int:
                         canvas.alpha_composite(img, ((dx - dy) * half + H * half,
                                                      (dx + dy) * quarter + lift - z * level_px
                                                      - TW * 3 // 2))
-    result = canvas.convert("RGB")
+    return canvas
+
+
+def main(argv: list[str]) -> int:
+    args = [a for a in argv[1:] if not a.startswith("--")]
+    if len(args) < 6:
+        print(__doc__)
+        return 2
+    opts = {a.split("=")[0]: a.split("=", 1)[1] for a in argv[1:] if a.startswith("--") and "=" in a}
+    for i, a in enumerate(argv):
+        if a in ("--max-level", "--scale") and i + 1 < len(argv):
+            opts[a] = argv[i + 1]
+    map_dir, out_png = args[0], args[1]
+    X, Y, W, H = (int(v) for v in args[2:6])
+    picture = render(map_dir, X, Y, W, H,
+                     max_level=int(opts["--max-level"]) if "--max-level" in opts else None,
+                     scale=float(opts.get("--scale", 1)),
+                     world="--world" in argv)
+    if picture is None:
+        print("nothing compiled in that area")
+        return 1
+    result = picture.convert("RGB")
     result.save(out_png)
-    print(f"wrote {out_png} {result.size}, levels 0-{top}, {len(squares)} squares")
+    print(f"wrote {out_png} {result.size}")
     return 0
 
 

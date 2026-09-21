@@ -1001,6 +1001,48 @@ def main(argv: list[str]) -> int:
               f"every wall has a cut-out for every window style ({len(walls)} walls"
               + (f", {len(holes)} without: {holes[:3]}" if holes else "") + ")")
 
+        print("pictures")
+        # Drawing needs compiled cells, which need WorldEd, which is not here.
+        # What can be checked is everything around that: the framing, the
+        # scale it picks, and that it says so rather than drawing nothing.
+        from knoxbuild import picture as pictures
+        import json as _json
+        info = _json.loads(Path(out, "selftest_info.json").read_text(encoding="utf-8"))
+        check(pictures.map_size(out) == (info["width_tiles"], info["height_tiles"]),
+              "a picture knows how big the map is")
+        check(not pictures.compiled(out), "and that this one is not compiled yet")
+        try:
+            pictures.picture(out)
+            asked = False
+        except FileNotFoundError as exc:
+            asked = "Compile" in str(exc)
+        check(asked, "so it asks for a compile instead of drawing nothing")
+        # The scale has to fall as the area grows, and never ask for a canvas
+        # bigger than the budget - a town at 1x is gigabytes.
+        scales = [pictures._scale_for(n, n, (1920, 1080)) for n in (40, 120, 320, 1200, 6000)]
+        check(scales == sorted(scales, reverse=True) and scales[0] <= 1.0
+              and scales[-1] >= pictures.MIN_SCALE,
+              f"the scale comes down as the area grows ({scales})")
+        biggest, shrunk = 0, None
+        for n in (40, 120, 320, 1200, 6000, 20000):
+            scale = pictures._scale_for(n, n, (1920, 1080))
+            _x, _y, w, h = pictures._within_budget(0, 0, n, n, scale)
+            if (w, h) != (n, n):
+                shrunk = n
+            biggest = max(biggest, pictures._pixels(w, h, scale))
+        check(biggest <= pictures.MAX_PIXELS,
+              f"and never asks for a canvas over the budget ({biggest / 1e6:.0f}M pixels)")
+        check(shrunk is not None,
+              "a map too big to draw at once is drawn from the middle out")
+        # An isometric view is a diamond, so the corners are empty and get cut
+        # off; what is left is centred, and never blown up past its own size.
+        from PIL import Image as _Image
+        diamond = _Image.new("RGBA", (400, 200), (0, 0, 0, 0))
+        diamond.paste(_Image.new("RGBA", (100, 50), (255, 0, 0, 255)), (150, 75))
+        framed = pictures._on_background(pictures._trim(diamond), (640, 360))
+        check(framed.size == (640, 360) and framed.getpixel((0, 0)) == pictures.BACKGROUND
+              and framed.getpixel((320, 180)) == (255, 0, 0),
+              "the empty corners are cropped and the rest is centred")
         print("compile")
         from compile_map import clear_stale
         stale = os.path.join(out, "lots")

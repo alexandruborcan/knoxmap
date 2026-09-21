@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **A picture of your map.** Once a map is compiled there is a *Draw a
+  picture of it* button beside the download: the whole town, the middle of it
+  close enough to see, and that same middle with the roofs off, which is how
+  every room and everything in it becomes visible. They are drawn from the
+  compiled cells the game itself loads, not from the terrain bitmap, so what
+  you get is the map rather than an impression of it.
+
+  `python tools/make_pictures.py output/<map>` does the same from a terminal,
+  and takes `--box x,y,w,h`, `--no-roofs`, `--size` and `--scale` for a
+  particular corner. The scale is chosen to suit the area, and a map too big
+  to draw in one go is drawn from the middle out rather than asking for a
+  canvas of several gigabytes.
+
 ## 1.3.9 mc1
 
 *A macOS-only release. Windows and Linux are unchanged and stay on 1.3.9.*

@@ -909,6 +909,60 @@ def serve_output(relpath: str):
     return send_from_directory(OUTPUT_DIR, relpath)
 
 
+# Pictures of a finished map: drawn from the compiled cells the game itself
+# loads, so they are the map rather than an impression of it. A town takes the
+# best part of a minute, so it runs on its own thread and the page asks.
+_PICTURES: dict[str, dict] = {}
+
+
+@app.route("/api/pictures", methods=["POST"])
+def api_pictures():
+    """Draw the map, the way the game would."""
+    data = _json_body()
+    map_dir = _map_dir(data.get("mapName", ""))
+    if map_dir is None:
+        return jsonify({"error": "Unknown map."}), 404
+    from knoxbuild import picture as pictures
+
+    if not pictures.compiled(map_dir):
+        return jsonify({"error": "Compile the map first - there is nothing to "
+                                 "draw until then."}), 400
+    name = map_dir.name
+    with _PROGRESS_LOCK:
+        if _PICTURES.get(name, {}).get("state") == "running":
+            return jsonify({"started": False, "state": "running"})
+        _PICTURES[name] = {"state": "running", "error": None, "files": []}
+
+    def worker() -> None:
+        log.info("pictures %s: started", name)
+        t0 = time.time()
+        try:
+            made = pictures.pictures_of(map_dir)
+            files = [f"/output/{map_dir.name}/pictures/{p.name}" for p in made]
+            log.info("pictures %s: %d in %.0fs", name, len(files), time.time() - t0)
+            with _PROGRESS_LOCK:
+                _PICTURES[name] = {"state": "done" if files else "error",
+                                   "files": files,
+                                   "error": None if files else "Nothing was drawn."}
+        except Exception as exc:  # noqa: BLE001 - reported to the window
+            eid = knoxlog.record(exc, f"pictures {name}: failed")
+            with _PROGRESS_LOCK:
+                _PICTURES[name] = {"state": "error", "errorId": eid,
+                                   "error": str(exc), "files": []}
+
+    threading.Thread(target=worker, daemon=True).start()
+    return jsonify({"started": True})
+
+
+@app.route("/api/pictures-status")
+def api_pictures_status():
+    map_dir = _map_dir(request.args.get("map", ""))
+    if map_dir is None:
+        return jsonify({"error": "Unknown map."}), 404
+    with _PROGRESS_LOCK:
+        return jsonify(dict(_PICTURES.get(map_dir.name, {"state": "idle", "files": []})))
+
+
 # ---- the rest of the pipeline, so the whole thing lives in one window ----
 
 def _worlded_exe(cli: bool = False) -> Path | None:

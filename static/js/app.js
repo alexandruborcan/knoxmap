@@ -547,6 +547,71 @@ function showUpgrade(data) {
   box.append(go, later);
 }
 
+// ---- a picture of the finished map ------------------------------------------------
+// Drawn from the compiled cells the game itself loads, so it is the map rather
+// than an impression of it - which is why it needs the map compiled, and why
+// it takes the better part of a minute and runs on its own thread.
+function wirePictures(mapName) {
+  const button = document.getElementById('makePictures');
+  const note = document.getElementById('pictureNote');
+  const shots = document.getElementById('pictureShots');
+  if (!button) return;
+  button.hidden = false;
+  note.textContent = '';
+  shots.hidden = true;
+  shots.innerHTML = '';
+
+  const show = files => {
+    shots.innerHTML = '';
+    const names = { 'town.png': 'The whole map', 'close.png': 'Close up',
+                    'inside.png': 'With the roofs off' };
+    for (const url of files) {
+      const file = url.split('/').pop();
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.title = names[file] || file;
+      const img = document.createElement('img');
+      img.src = `${url}?t=${Date.now()}`;   // a redraw replaces the same file
+      img.alt = link.title;
+      link.append(img);
+      shots.append(link);
+    }
+    shots.hidden = files.length === 0;
+  };
+
+  button.onclick = async () => {
+    button.disabled = true;
+    note.className = 'hint';
+    note.textContent = 'Drawing the map — this takes a minute…';
+    try {
+      const res = await fetch('/api/pictures', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mapName }),
+      });
+      const started = await res.json();
+      if (!res.ok) throw apiError(started, res);
+      for (;;) {
+        await new Promise(r => setTimeout(r, 1500));
+        const st = await (await fetch(
+          `/api/pictures-status?map=${encodeURIComponent(mapName)}`)).json();
+        if (st.state === 'running') continue;
+        if (st.error) throw new Error(st.error);
+        show(st.files || []);
+        note.textContent = 'Click one to see it full size.';
+        break;
+      }
+    } catch (err) {
+      note.className = 'hint error';
+      note.textContent = err.message || String(err);
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Draw it again';
+    }
+  };
+}
+
+
 async function upgradeMap(data, button) {
   const box = document.getElementById('upgradeNote');
   const say = text => { box.querySelector('span').textContent = text; };
@@ -816,6 +881,7 @@ function renderResults(data) {
   wireDownload(all, 'zip', 'the zip');
   const note = document.getElementById('saveNote');
   if (note) { note.className = 'hint'; note.textContent = ''; }
+  wirePictures(data.mapName);
 
   document.querySelectorAll('#results .ph').forEach(el => {
     el.textContent = data.mapName;
