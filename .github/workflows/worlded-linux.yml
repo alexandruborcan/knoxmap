@@ -285,8 +285,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha=$(grep 'tar.gz' SHA256 | cut -d' ' -f1)
+          # Never "latest": that is what the in-app updater asks GitHub for,
+          # and what every download link points at. A compiler release taking
+          # it sends players to a 30 MB tarball of Qt instead of to KnoxMap.
           gh release create "${{ inputs.tag }}" \
             --repo "$GITHUB_REPOSITORY" \
+            --latest=false \
             --title "PZWorldEd_cli for Linux (${{ inputs.tag }})" \
             --notes "A native Linux build of the patched map compiler, so
           KnoxMap does not need Wine to make a map.

@@ -495,6 +495,18 @@ def check_portable(check) -> None:
     want = "windows" if windows else ("macos" if sys.platform == "darwin" else "linux")
     picked = (updater._asset(three) or {}).get("name", "")
     check(want in picked, f"the updater takes the release built for this system ({picked})")
+
+    # The map compiler is published from this repository too, and its tags are
+    # dates: "worlded-cli-linux-20260909f" read as a version is 20260909, far
+    # newer than any KnoxMap, and GitHub had made it the "latest" release. The
+    # updater would have offered a player 30 MB of Qt as an upgrade.
+    check(not updater._is_knoxmap({"tag_name": "worlded-cli-linux-20260909f"})
+          and not updater._is_knoxmap({"tag_name": "worlded-cli-20260909f"}),
+          "a release that is not KnoxMap is not an update")
+    check(updater._is_knoxmap({"tag_name": "v1.3.9"})
+          and not updater._is_knoxmap({"tag_name": "v1.3.9", "prerelease": True})
+          and not updater._is_knoxmap({"tag_name": "v1.4.0", "draft": True}),
+          "a released version of KnoxMap is, and a draft or a pre-release is not")
     check((updater._asset({"assets": [{"name": "KnoxMap-v1.3.6.zip"}]}) or {}).get("name")
           == "KnoxMap-v1.3.6.zip",
           "and a release from before they were split is still for everybody")

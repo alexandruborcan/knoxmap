@@ -147,11 +147,10 @@ def check(force: bool = False) -> dict:
         if staged and is_newer(staged["version"], current) and Path(staged["zip"]).exists():
             _set(state="ready", latest=staged["version"], notes=staged.get("notes", ""))
             return status()
-        r = requests.get(API_LATEST, headers={"User-Agent": USER_AGENT,
-                                              "Accept": "application/vnd.github+json"},
-                         timeout=15)
-        r.raise_for_status()
-        release = r.json()
+        release = _newest_release()
+        if release is None:
+            _set(state="current", latest=current, notes="")
+            return status()
         latest = (release.get("tag_name") or "").lstrip("v")
         if not is_newer(latest, current):
             _set(state="current", latest=latest, notes="")
@@ -203,6 +202,40 @@ class _Bundle:
 
 def _open_release(path: Path) -> _Bundle:
     return _Bundle(path)
+
+
+# The repository also carries releases that are not KnoxMap: the map compiler
+# is published from here too, for Windows and for Linux. Their tags are dates,
+# so "worlded-cli-linux-20260909f" read as a version number is 20260909 - far
+# newer than any KnoxMap - and the updater would have offered a player 30 MB
+# of Qt as an upgrade. Only a tag that is a version is a release of KnoxMap.
+VERSION_TAG = re.compile(r"v?\d+(?:\.\d+){0,3}$")
+
+
+def _is_knoxmap(release: dict) -> bool:
+    return (not release.get("draft") and not release.get("prerelease")
+            and bool(VERSION_TAG.fullmatch(release.get("tag_name") or "")))
+
+
+def _newest_release() -> dict | None:
+    """The newest release of KnoxMap itself.
+
+    GitHub's "latest" is whichever release was last marked as such, which is
+    not necessarily one of ours, so it is checked rather than trusted, and the
+    full list is the fallback.
+    """
+    import requests
+
+    head = {"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"}
+    r = requests.get(API_LATEST, headers=head, timeout=15)
+    r.raise_for_status()
+    release = r.json()
+    if _is_knoxmap(release):
+        return release
+    r = requests.get(API_RELEASES, headers=head, timeout=15)
+    r.raise_for_status()
+    ours = [x for x in r.json() if _is_knoxmap(x)]
+    return max(ours, key=lambda x: _parse(x["tag_name"].lstrip("v")), default=None)
 
 
 def _asset(release: dict) -> dict | None:
