@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- **Linux and macOS.** `./setup.sh` once, `./knoxmap.sh` after that. Drawing
+  the terrain, the buildings, the paper map and installing the mod are all
+  Python and need nothing extra; Compile runs the map tools — Windows
+  programs — through Wine, which a PC playing Project Zomboid through Proton
+  already has. Without Wine every other step still works and the window says
+  so, and you can finish a map by hand in WorldEd. `KNOXMAP_WINE` points at a
+  particular build; a native build of the tools, dropped in
+  `vendor/PZMappingTools/bin` without the `.exe`, is run directly and left
+  alone by setup. See [LINUX.md](LINUX.md).
+- **A window, or your browser.** pywebview needs a desktop toolkit behind it
+  that pip cannot install, so a Linux machine without one had no window at
+  all. KnoxMap now checks before it serves and opens your browser instead —
+  the same app, nothing missing. `KNOXMAP_BROWSER=1` forces that anywhere.
+- Steam is found where each system keeps it: the two paths every
+  distribution uses, Flatpak, Snap, macOS's Application Support, and
+  libraries on a second disk under `/mnt`, `/media` and `/run/media`.
+- The updater could not restart the app off Windows: it looked for the
+  private Python in `Scripts/` and detached with flags only Windows has.
+
 ## 1.3.6
 
 Everything in here works off tags OpenStreetMap uses the world over, so it

@@ -402,6 +402,10 @@ async function checkSetup() {
     const res = await fetch('/api/setup-status');
     const data = await res.json();
     const card = document.getElementById('setupCard');
+    // Named after the script this PC actually has: Setup.bat on Windows,
+    // ./setup.sh on Linux and macOS.
+    const script = document.getElementById('setupScript');
+    if (script && data.setupCommand) script.textContent = data.setupCommand;
     if (data.ready) { card.hidden = true; return; }
     document.getElementById('setupList').innerHTML = data.checks.map(c =>
       `<li class="${c.ok ? 'ok' : 'missing'}"><span>${c.ok ? '✓' : '✗'}</span>

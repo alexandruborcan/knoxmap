@@ -641,6 +641,7 @@ def _too_big_for_memory(tiles_w: float, tiles_h: float) -> str | None:
     of a few square kilometres needs more: it used to get halfway through and
     fail with "MemoryError".
     """
+    import knoxpaths
     needed = tiles_w * tiles_h * BYTES_PER_TILE + BASE_BYTES
     status = knoxlog.memory_status()
     if not status:
@@ -650,7 +651,8 @@ def _too_big_for_memory(tiles_w: float, tiles_h: float) -> str | None:
     if sys.maxsize <= 2 ** 32 and needed > room * 0.8:
         return (f"This map needs about {needed / 1e9:.1f} GB of memory, and KnoxMap is "
                 f"running 32-bit Python, which can only use about 2 GB however much this "
-                f"PC has. Close KnoxMap and run Setup.bat again: it fetches a 64-bit "
+                f"PC has. Close KnoxMap and run {knoxpaths.setup_command()} again: it "
+                f"fetches a 64-bit "
                 f"Python and makes its environment again. " + smaller)
     if needed > min(free, room) * 0.8:
         return (f"This map needs about {needed / 1e9:.1f} GB of memory and only "
@@ -1101,7 +1103,7 @@ def api_setup_status():
                 "plants. Maps made with it require it."},
     ]
     return jsonify({"ready": all(c["ok"] for c in checks), "checks": checks,
-                    "optional": optional,
+                    "optional": optional, "setupCommand": setup,
                     "mods_dir": str(knoxpaths.zomboid_user_dir() / "mods")})
 
 
