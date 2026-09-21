@@ -18,6 +18,11 @@
 - Steam is found where each system keeps it: the two paths every
   distribution uses, Flatpak, Snap, macOS's Application Support, and
   libraries on a second disk under `/mnt`, `/media` and `/run/media`.
+- The project the map tools read carries paths they can follow. Wine shows
+  the filesystem as drive `Z:`, so a project saying its export folder was
+  `/home/you/maps/town/tmx` named a folder WorldEd could not open; every
+  path handed to the tools goes through `winepath` now, while KnoxMap keeps
+  opening the real ones itself.
 - The updater could not restart the app off Windows: it looked for the
   private Python in `Scripts/` and detached with flags only Windows has.
 
