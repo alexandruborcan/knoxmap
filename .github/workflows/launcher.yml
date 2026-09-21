@@ -28,7 +28,7 @@ jobs:
           chmod +x win/build_launcher.sh
           win/build_launcher.sh
           file KnoxMap.exe
-          file KnoxMap.exe | grep -q 'PE32+ executable .* \(GUI\)' ||
+          file KnoxMap.exe | grep -qE 'PE32\+ executable \(GUI\) x86-64' ||
             { echo "not a windowed 64-bit exe"; exit 1; }
 
       - uses: actions/upload-artifact@v4
