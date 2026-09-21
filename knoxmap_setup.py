@@ -270,14 +270,23 @@ def find_game() -> Path | None:
         # Run by the updater, with nobody to answer: keep the folder set before.
         saved = knoxpaths.load_config().get("pz_install")
         return Path(saved) if saved else None
+    if sys.platform == "darwin":
+        say("      On a Mac the game lives inside ProjectZomboid.app. If you do not")
+        say("      know where, this prints it:")
+        say("        find ~/Library/Application\\ Support/Steam -type d -name texturepacks")
+    say("      Any of these will do: the Steam library, the ProjectZomboid folder,")
+    say("      the .app on a Mac, or the media folder itself.")
     while True:
-        answer = _ask("      Paste the ProjectZomboid folder path (or press Enter to skip): ").strip().strip('"')
+        answer = _ask("      Paste the path (or press Enter to skip): ").strip().strip('"')
         if not answer:
             return None
-        if (Path(answer) / "media" / "texturepacks").exists():
-            _warn_if_not_build42(Path(answer))
-            return Path(answer)
-        say("      That folder has no media/texturepacks inside - try again.")
+        found = knoxpaths.pz_install_from(answer)
+        if found:
+            say(f"      using {found}")
+            _warn_if_not_build42(found)
+            return found
+        say(f"      No Project Zomboid there: nothing under {answer} holds a")
+        say("      media/texturepacks folder. Try again, or press Enter to skip.")
 
 
 def configure_tools(tools: Path, game: Path | None) -> None:
@@ -297,10 +306,19 @@ def configure_tools(tools: Path, game: Path | None) -> None:
     # much as a small sash - got a small house-window hole cut in the wall, so
     # tall windows showed wall behind the glass. A Steam library off the
     # default drive is not found by the editor's own search.
-    game_line = f"ProjectZomboidDirectory={game.as_posix()}\n" if game else ""
+    # The editor appends "media" to this itself, so it wants the folder above
+    # the media folder - which on a Mac is inside the application bundle, not
+    # the game folder. And every path here has to be spelled the way the
+    # editor will read it: one running under Wine cannot open /Users/somebody.
+    media = knoxpaths.pz_media_dir(game) if game else None
+
+    def ini_path(path: Path) -> str:
+        return path.as_posix() if os.name == "nt" else knoxpaths.tool_path(path)
+
+    game_line = f"ProjectZomboidDirectory={ini_path(media.parent)}\n" if media else ""
     ini.write_text("[%General]\nSettingsSchema=2\n\n[Paths]\n"
-                   f"ConfigDirectory={config_dir.as_posix()}\n"
-                   f"TilesDirectory={tiles_dir.as_posix()}\n" + game_line,
+                   f"ConfigDirectory={ini_path(config_dir)}\n"
+                   f"TilesDirectory={ini_path(tiles_dir)}\n" + game_line,
                    encoding="utf-8")
     say("      editor paths written")
 
@@ -309,6 +327,9 @@ def configure_tools(tools: Path, game: Path | None) -> None:
         return
     from tools import extract_tiles, prune_tilesets
 
+    # Wherever this system keeps the game's artwork - inside the application
+    # bundle on a Mac, in <game>/media everywhere else.
+    packs = knoxpaths.pz_media_dir(game) / "texturepacks"
     tilesets = config_dir / "Tilesets.txt"
     # Start again from the full catalogue, so a sheet pruned by an earlier run
     # (say, before the game was updated) gets another chance to be extracted.
@@ -324,7 +345,7 @@ def configure_tools(tools: Path, game: Path | None) -> None:
         say("      adding Build 42 floor-pack tiles to your tile sheets ...")
         log = io.StringIO()
         with contextlib.redirect_stdout(log):
-            for pack in sorted((game / "media" / "texturepacks").glob("*2x.floor.pack")):
+            for pack in sorted(packs.glob("*2x.floor.pack")):
                 extract_tiles.extract_pack(str(pack), catalog, set(present), str(two_x), merge=True)
         merged.parent.mkdir(parents=True, exist_ok=True)
         merged.write_text("1", encoding="utf-8")
@@ -333,7 +354,7 @@ def configure_tools(tools: Path, game: Path | None) -> None:
         say(f"      extracting {len(missing)} tile sheets from your game (a few minutes) ...")
         log = io.StringIO()
         with contextlib.redirect_stdout(log):
-            extract_tiles.main(["extract_tiles", str(game / "media" / "texturepacks"),
+            extract_tiles.main(["extract_tiles", str(packs),
                                 str(tilesets), str(two_x), *missing])
         (tools / "settings" / "extract_tiles.log").write_text(log.getvalue(), encoding="utf-8")
         merged.write_text("1", encoding="utf-8")   # main() merges the floor packs itself

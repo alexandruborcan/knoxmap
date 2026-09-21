@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.3.9 mc1
+
+*A macOS-only release. Windows and Linux are unchanged and stay on 1.3.9.*
+
+- **A tutorial in the download.** `tutorial.txt` walks through it start to
+  finish: what to have installed, running Setup, finding the game when it
+  asks, choosing an area that will not blow the limit, the four buttons and
+  what each one does, and what to do when a step will not run.
+
+- **One system at a time.** A fix that only matters on one system is now
+  released for that system alone - this one is macOS only, and Windows and
+  Linux stay on 1.3.9 with nothing to download. KnoxMap only offers you an
+  update that has a file for the PC you are on.
+
+- **macOS could not find Project Zomboid.** On a Mac the game ships as an
+  application bundle and keeps everything inside it, but KnoxMap only ever
+  looked for `<ProjectZomboid>/media`. So Setup found the install, looked
+  straight into it, and said "That folder has no media/texturepacks inside -
+  try again" - including when you pasted the path by hand, because the path
+  you pasted was the one being rejected.
+
+  The game's artwork is now looked up in one place that knows about bundles,
+  so a Mac install is found on its own, with nothing to paste. If it still
+  asks, any folder that names the install is taken: the Steam library, the
+  ProjectZomboid folder, the `.app`, anything inside it, or the media folder
+  itself. An install folder Steam named something else is found too, and a
+  folder you put under **Steam libraries** in the window counts even when it
+  is the game rather than a library.
+
+- **The editor was given a path it could not open.** The game folder written
+  into `PZTools.ini` was always spelled the machine's way, but off Windows
+  the editor runs under Wine and cannot open `/Users/somebody/...`. Without
+  the game's tile definitions every window gets a small house-window hole cut
+  in the wall, so a shop's floor-to-ceiling glass showed wall behind it. Each
+  path is now written the way the editor in use will read it, and on a Mac it
+  points inside the bundle where the media actually is.
+
 ## 1.3.9
 
 - **Only KnoxMap counts as an update.** The map compiler is published from

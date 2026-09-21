@@ -8,6 +8,10 @@ name: release
 # and macOS get tarballs, because a zip has no executable bit and ./setup.sh
 # would not run out of one. Each carries only the launchers for its own
 # system, so nobody has to work out which of four files to double-click.
+#
+# A fix that only matters on one system is released for that system alone:
+# tag it v1.3.9-mc1 and only the macOS file is built and published, and the
+# other systems stay where they are. v1.3.9 with no suffix is for everyone.
 on:
   push:
     tags: ["v*"]
@@ -33,45 +37,87 @@ jobs:
         with:
           name: KnoxMap-exe
 
+      - name: Which systems this release is for
+        id: which
+        run: |
+          set -eu
+          v="${GITHUB_REF_NAME}"
+          case "$v" in
+            *-*)
+              case "${v##*-}" in
+                mac*|mc*)     systems=macos ;;
+                win*|w[0-9]*) systems=windows ;;
+                lin*|l[0-9]*) systems=linux ;;
+                *) echo "no system named in $v - use -mc1, -win1 or -lin1"; exit 1 ;;
+              esac ;;
+            *) systems="windows linux macos" ;;
+          esac
+          echo "systems=$systems" >> "$GITHUB_OUTPUT"
+          echo "$v is for: $systems"
+
       - name: Pack one release per system
+        env:
+          SYSTEMS: ${{ steps.which.outputs.systems }}
         run: |
           set -eu
           v="${GITHUB_REF_NAME}"
           # git archive honours .gitattributes export-ignore and keeps the
           # executable bit that setup.sh and knoxmap.sh carry in the index.
           git archive --format=tar --prefix=KnoxMap/ -o base.tar HEAD
-          for system in windows linux macos; do
+          for system in $SYSTEMS; do
             mkdir -p "pack/$system"
             tar -C "pack/$system" -xf base.tar
+            case "$system" in
+              windows)
+                rm -f pack/windows/KnoxMap/*.sh
+                # The launcher people double-click, built and run through by
+                # the launcher workflow. It is not in the repository as a
+                # binary, and it is no use on Linux or macOS.
+                cp KnoxMap.exe pack/windows/KnoxMap/
+                (cd pack/windows && zip -qr "$GITHUB_WORKSPACE/KnoxMap-$v-windows.zip" KnoxMap)
+                ;;
+              *)
+                rm -f "pack/$system/KnoxMap"/*.bat
+                rm -rf "pack/$system/KnoxMap/win"
+                (cd "pack/$system" && tar -czf "$GITHUB_WORKSPACE/KnoxMap-$v-$system.tar.gz" KnoxMap)
+                # The launchers must still be executable inside the tarball.
+                tar -tvzf "$GITHUB_WORKSPACE/KnoxMap-$v-$system.tar.gz" |
+                  grep -E 'KnoxMap/(setup|knoxmap)\.sh' | grep -q 'rwxr-xr-x' ||
+                  { echo "setup.sh is not executable in the $system tarball"; exit 1; }
+                ;;
+            esac
           done
-          rm -f pack/windows/KnoxMap/*.sh
-          rm -f pack/linux/KnoxMap/*.bat pack/macos/KnoxMap/*.bat
-          # The launcher people double-click, built and run through by the
-          # launcher workflow. It is not in the repository as a binary, and
-          # it is no use on Linux or macOS.
-          cp KnoxMap.exe pack/windows/KnoxMap/
-          rm -rf pack/linux/KnoxMap/win pack/macos/KnoxMap/win
-          (cd pack/windows && zip -qr "$GITHUB_WORKSPACE/KnoxMap-$v-windows.zip" KnoxMap)
-          (cd pack/linux && tar -czf "$GITHUB_WORKSPACE/KnoxMap-$v-linux.tar.gz" KnoxMap)
-          (cd pack/macos && tar -czf "$GITHUB_WORKSPACE/KnoxMap-$v-macos.tar.gz" KnoxMap)
           ls -l KnoxMap-$v-*
-          # The launchers must still be executable inside the tarballs.
-          tar -tvzf "KnoxMap-$v-linux.tar.gz" | grep -E 'KnoxMap/(setup|knoxmap)\.sh' |
-            grep -q 'rwxr-xr-x' || { echo "setup.sh is not executable in the tarball"; exit 1; }
 
       - name: Notes from CHANGELOG.md
+        env:
+          SYSTEMS: ${{ steps.which.outputs.systems }}
         run: |
+          set -eu
+          # The tag spells a one-system release with a dash, the changelog
+          # heading with a space: v1.3.9-mc1 is "## 1.3.9 mc1".
           version="${GITHUB_REF_NAME#v}"
+          version="$(printf '%s' "$version" | sed 's/-\([a-z]\)/ \1/')"
           awk -v v="$version" '
             /^## / { on = (index($0, "## " v " ") == 1 || $0 == "## " v) ; next }
             on' CHANGELOG.md > notes.md
           if [ ! -s notes.md ]; then echo "See CHANGELOG.md." > notes.md; fi
           {
+            case "$SYSTEMS" in
+              *' '*) ;;
+              *) printf '\n**This release is for %s only.** Every other system stays\n' "$SYSTEMS"
+                 printf 'where it is - there is nothing in here for it.\n' ;;
+            esac
             printf '\n---\n**Install**\n\n'
+            printf 'New to this? `tutorial.txt` in the download walks through it.\n\n'
             printf '| System | Download | Then |\n|---|---|---|\n'
-            printf '| Windows 10/11 | `KnoxMap-%s-windows.zip` | unzip it and double-click `KnoxMap.exe` |\n' "$GITHUB_REF_NAME"
-            printf '| Linux | `KnoxMap-%s-linux.tar.gz` | `tar -xzf` it, then `./setup.sh` and `./knoxmap.sh` |\n' "$GITHUB_REF_NAME"
-            printf '| macOS | `KnoxMap-%s-macos.tar.gz` | `tar -xzf` it, then `./setup.sh` and `./knoxmap.sh` |\n' "$GITHUB_REF_NAME"
+            for system in $SYSTEMS; do
+              case "$system" in
+                windows) printf '| Windows 10/11 | `KnoxMap-%s-windows.zip` | unzip it and double-click `KnoxMap.exe` |\n' "$GITHUB_REF_NAME" ;;
+                linux)   printf '| Linux | `KnoxMap-%s-linux.tar.gz` | `tar -xzf` it, then `./setup.sh` and `./knoxmap.sh` |\n' "$GITHUB_REF_NAME" ;;
+                macos)   printf '| macOS | `KnoxMap-%s-macos.tar.gz` | `tar -xzf` it, then `./setup.sh` and `./knoxmap.sh` |\n' "$GITHUB_REF_NAME" ;;
+              esac
+            done
             printf '\nLinux and macOS need 64-bit Python 3.10+ of your own; see LINUX.md.\n'
             printf '\n`KnoxMap.exe` finds Python, runs setup the first time and opens\n'
             printf 'the window. `KnoxMap.bat` is still in the folder and does the same,\n'
@@ -82,8 +128,23 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          SYSTEMS: ${{ steps.which.outputs.systems }}
         run: |
+          set -eu
           v="${GITHUB_REF_NAME}"
-          gh release create "$v" \
-            "KnoxMap-$v-windows.zip" "KnoxMap-$v-linux.tar.gz" "KnoxMap-$v-macos.tar.gz" \
-            --title "KnoxMap ${v#v}" --notes-file notes.md --latest
+          files=""
+          for system in $SYSTEMS; do
+            case "$system" in
+              windows) files="$files KnoxMap-$v-windows.zip" ;;
+              *)       files="$files KnoxMap-$v-$system.tar.gz" ;;
+            esac
+          done
+          # Only a release for every system becomes "latest": that is what the
+          # download links point at and what the updater asks for first, and
+          # one system's fix is not the version everybody else should see.
+          case "$SYSTEMS" in
+            *' '*) latest=--latest ;;
+            *)     latest=--latest=false ;;
+          esac
+          title="KnoxMap $(printf '%s' "${v#v}" | sed 's/-\([a-z]\)/ \1/')"
+          gh release create "$v" $files --title "$title" --notes-file notes.md "$latest"

@@ -209,7 +209,9 @@ def _open_release(path: Path) -> _Bundle:
 # so "worlded-cli-linux-20260909f" read as a version number is 20260909 - far
 # newer than any KnoxMap - and the updater would have offered a player 30 MB
 # of Qt as an upgrade. Only a tag that is a version is a release of KnoxMap.
-VERSION_TAG = re.compile(r"v?\d+(?:\.\d+){0,3}$")
+# "v1.3.9", and "v1.3.9-mc1" - a release for one system only, which carries
+# the system and its number after the version.
+VERSION_TAG = re.compile(r"v?\d+(?:\.\d+){0,3}(?:-[a-z]+\d+)?$")
 
 
 def _is_knoxmap(release: dict) -> bool:
@@ -217,12 +219,22 @@ def _is_knoxmap(release: dict) -> bool:
             and bool(VERSION_TAG.fullmatch(release.get("tag_name") or "")))
 
 
+def _for_this_system(release: dict) -> bool:
+    """Whether this release has anything in it for the PC asking.
+
+    Fixes that only matter on one system are released for that system alone,
+    so most releases carry a file for every system and some carry one. A
+    release with nothing here is not an update here, however new it is.
+    """
+    return _is_knoxmap(release) and _asset(release) is not None
+
+
 def _newest_release() -> dict | None:
-    """The newest release of KnoxMap itself.
+    """The newest release of KnoxMap with a download for this system.
 
     GitHub's "latest" is whichever release was last marked as such, which is
-    not necessarily one of ours, so it is checked rather than trusted, and the
-    full list is the fallback.
+    not necessarily one of ours and not necessarily for this system, so it is
+    checked rather than trusted and the full list is the fallback.
     """
     import requests
 
@@ -230,11 +242,11 @@ def _newest_release() -> dict | None:
     r = requests.get(API_LATEST, headers=head, timeout=15)
     r.raise_for_status()
     release = r.json()
-    if _is_knoxmap(release):
+    if _for_this_system(release):
         return release
     r = requests.get(API_RELEASES, headers=head, timeout=15)
     r.raise_for_status()
-    ours = [x for x in r.json() if _is_knoxmap(x)]
+    ours = [x for x in r.json() if _for_this_system(x)]
     return max(ours, key=lambda x: _parse(x["tag_name"].lstrip("v")), default=None)
 
 

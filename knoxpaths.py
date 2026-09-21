@@ -416,15 +416,85 @@ def _is_dir(path: Path) -> bool:
         return False
 
 
+# Where the game keeps its artwork, which is not the same place on every
+# system. Windows and Linux have <game>/media; macOS ships the game as an
+# application bundle with everything inside it, and nothing here used to look
+# in there - so a Mac install was found and then turned away for having no
+# media in it, however the player spelled the path.
+_BUNDLE_MEDIA = ("Contents/Java", "Contents/Resources", "Contents/MacOS", "Contents")
+
+
+def _media_in(root: Path) -> Path | None:
+    """The game's media folder at or just inside `root`, or None."""
+    if _is_dir(root / "texturepacks"):
+        return root                                  # the media folder itself
+    if _is_dir(root / "media" / "texturepacks"):
+        return root / "media"                        # Windows and Linux
+    bundles = [root] if root.suffix == ".app" else sorted(root.glob("*.app"))
+    for bundle in bundles:
+        for inside in _BUNDLE_MEDIA:
+            media = bundle.joinpath(*inside.split("/")) / "media"
+            if _is_dir(media / "texturepacks"):
+                return media
+    return None
+
+
+def pz_media_dir(game: Path | str | None = None) -> Path | None:
+    """The game's media folder - the one holding texturepacks.
+
+    Everything that reads the game's artwork or its tile definitions goes
+    through here, so the difference between systems is in one place.
+    """
+    if game is None:
+        game = pz_install_dir()
+    return _media_in(Path(game)) if game else None
+
+
+def pz_install_from(answer: Path | str) -> Path | None:
+    """Make sense of a folder somebody pasted as their game.
+
+    People paste the Steam library, the common folder inside it, the game
+    folder, the application bundle on a Mac, or the media folder itself. They
+    all name the same install, so all of them are taken - being told "try
+    again" while looking at the game is no way to start.
+    """
+    path = Path(str(answer).strip().strip('"').strip("'"))
+    tries = [path,
+             path / "steamapps" / "common" / "ProjectZomboid",
+             path / "common" / "ProjectZomboid",
+             path / "ProjectZomboid"]
+    tries += list(path.parents)[:4]          # pasted from inside the install
+    for candidate in tries:
+        if _media_in(candidate):
+            return candidate
+    return None
+
+
 def pz_install_dir() -> Path | None:
-    """The Project Zomboid game folder (the one holding media/texturepacks)."""
+    """The Project Zomboid game folder (the one holding the media folder)."""
     configured = _first(os.environ.get("PZ_INSTALL"), load_config().get("pz_install"))
     if configured:
         return configured
-    for lib in _steam_libraries():
-        candidate = lib / "steamapps" / "common" / "ProjectZomboid"
-        if _exists(candidate / "media" / "texturepacks"):
-            return candidate
+    libraries = _steam_libraries()
+    for lib in libraries:
+        common = lib / "steamapps" / "common"
+        for candidate in (common / "ProjectZomboid", common / "Project Zomboid"):
+            if _media_in(candidate):
+                return candidate
+    # An install folder named something else. One level of each library's
+    # common folder is a few dozen names, not a crawl of the disk.
+    for lib in libraries:
+        for candidate in _children(lib / "steamapps" / "common"):
+            if "zomboid" in candidate.name.lower() and _media_in(candidate):
+                return candidate
+    # A folder the player named themselves that is not a Steam library at all
+    # - a copy of the game somewhere of their own. The box asks for a library,
+    # but somebody who pastes the game into it means the same thing, and being
+    # ignored for it is no help to anybody.
+    for folder in chosen_steam_folders():
+        found = pz_install_from(folder)
+        if found:
+            return found
     return None
 
 
@@ -434,7 +504,8 @@ def is_build42(game: Path | None) -> bool:
     Build 42 split the floor tiles into their own *.floor.pack files; Build 41,
     still Steam's default branch for many players, has none.
     """
-    return bool(game) and any((Path(game) / "media" / "texturepacks").glob("*.floor.pack"))
+    media = pz_media_dir(game)
+    return bool(media) and any((media / "texturepacks").glob("*.floor.pack"))
 
 
 ELEVATORS_WORKSHOP_ID = "3780306632"

@@ -447,6 +447,37 @@ def check_portable(check) -> None:
     check(knoxpaths.setup_command() == ("Setup.bat" if windows else "./setup.sh"),
           f"the window names the right setup script ({knoxpaths.setup_command()})")
 
+    # macOS keeps the game inside an application bundle, so <game>/media is
+    # not there and a Mac install was found and then turned away for having no
+    # artwork in it. Every way somebody might name that install has to work.
+    mac = Path(tempfile.mkdtemp()) / "Steam"
+    bundle = mac / "steamapps/common/ProjectZomboid/ProjectZomboid.app"
+    packs = bundle / "Contents/Java/media/texturepacks"
+    packs.mkdir(parents=True)
+    (packs / "Tiles2x.floor.pack").write_bytes(b"")
+    game = mac / "steamapps/common/ProjectZomboid"
+    ways = {
+        "the Steam library": mac,
+        "the game folder": game,
+        "the .app": bundle,
+        "inside the bundle": bundle / "Contents/Java",
+        "the media folder": bundle / "Contents/Java/media",
+    }
+    missed = [what for what, path in ways.items()
+              if (knoxpaths.pz_media_dir(knoxpaths.pz_install_from(path) or "") or Path("x"))
+              != packs.parent]
+    check(not missed,
+          "the game inside a Mac .app is found however its folder is named"
+          + (f" (missed: {missed})" if missed else ""))
+    check(knoxpaths.is_build42(knoxpaths.pz_install_from(game)),
+          "and Build 42 is recognised through the bundle")
+    real = Path(tempfile.mkdtemp()) / "ProjectZomboid"
+    (real / "media" / "texturepacks").mkdir(parents=True)
+    check(knoxpaths.pz_media_dir(real) == real / "media",
+          "while Windows and Linux still find <game>/media")
+    check(knoxpaths.pz_install_from(Path(tempfile.mkdtemp())) is None,
+          "and a folder with no game in it is still refused")
+
     # A machine with no desktop toolkit still gets the whole app, in a browser.
     os.environ["KNOXMAP_BROWSER"] = "1"
     try:

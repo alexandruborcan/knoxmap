@@ -1071,7 +1071,13 @@ def api_setup_status():
         {"id": "compiler", "ok": bool(cli), "label": "Patched map compiler",
          "fix": f"Run {setup}, or compile by hand with Open in WorldEd."},
         {"id": "game", "ok": bool(game), "label": "Project Zomboid install",
-         "fix": f"Install the game, then run {setup} again."},
+         "fix": ("Put the folder your Steam games are in under Steam libraries "
+                 f"above - the game's own folder works too - or run {setup} and "
+                 "paste the path when it asks."
+                 + (" On a Mac the game lives inside ProjectZomboid.app; that "
+                    "path is fine, and so is anything above it."
+                    if sys.platform == "darwin" else "")
+                 + f" If it is not installed yet, install it and run {setup} again.")},
         {"id": "build42", "ok": knoxpaths.is_build42(game),
          "label": "Project Zomboid Build 42",
          "fix": "Your game looks like Build 41. In Steam choose the Build 42 "
