@@ -159,8 +159,8 @@ jobs:
           # Windows build goes, because WorldEd takes the folder ABOVE bin as
           # its installation root - that is where config/, Tiles/ and
           # settings/ live. On Windows the log says so plainly:
-          #   Installation root ...\PZMappingTools
-          # for an exe at ...\PZMappingToolsin\PZWorldEd_cli.exe. If the
+          #   Installation root <tools>/PZMappingTools
+          # for an exe at <tools>/PZMappingTools/bin/PZWorldEd_cli.exe. If the
           # Linux build resolved it to bin/ instead it would find no artwork
           # and no configuration, and every compile would fail - so it is
           # checked here rather than on somebody's PC.
