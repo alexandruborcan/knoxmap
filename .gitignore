@@ -1,3 +1,7 @@
+# The Windows launcher, built by .github/workflows/launcher.yml and put in
+# the Windows download. A binary does not belong in the repository.
+/KnoxMap.exe
+
 # Python
 __pycache__/
 *.py[cod]

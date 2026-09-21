@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.3.8
+
+- **`KnoxMap.exe`.** Windows downloads now carry a launcher you double-click
+  instead of a batch file: it works in its own folder, runs setup the first
+  time in a console you can watch, starts the window and gets out of the way.
+  It carries KnoxMap's icon and version, and it exits as soon as the window
+  is up so that an update is free to replace it. `KnoxMap.bat` is still
+  there and still works, for anyone who would rather read what they are
+  running. Windows will warn about an unsigned program the first time:
+  **More info** then **Run anyway**.
+
+  It is built with mingw-w64 and then *run* on a Windows runner before any
+  release goes out - a folder with no environment must run Setup, and one
+  with an environment must start the window, exit within a few seconds and
+  leave its own file replaceable. None of that can be checked on the machine
+  it is written on.
+
 ## 1.3.7
 
 - **A town with no zombies in it.** The project told WorldEd where the zombie

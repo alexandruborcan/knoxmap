@@ -1,0 +1,105 @@
+name: launcher
+
+# KnoxMap.exe: built with mingw-w64 on Linux, then actually run on Windows.
+#
+# The launcher is the first thing a player touches, and it cannot be tested
+# on the machine it is written on, so it is built and exercised here: a folder
+# that has no environment yet must run Setup, and one that has must start
+# the window and get out of the way.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  build:
+    name: Build KnoxMap.exe
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: mingw-w64
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq
+             gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+
+      - name: Build
+        run: |
+          chmod +x win/build_launcher.sh
+          win/build_launcher.sh
+          file KnoxMap.exe
+          file KnoxMap.exe | grep -q 'PE32+ executable .* \(GUI\)' ||
+            { echo "not a windowed 64-bit exe"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KnoxMap-exe
+          path: KnoxMap.exe
+          if-no-files-found: error
+
+  run_it:
+    name: Run it on Windows
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: KnoxMap-exe
+
+      - name: It runs Setup when there is no environment yet
+        shell: pwsh
+        run: |
+          $box = Join-Path $env:RUNNER_TEMP 'first-run'
+          New-Item -ItemType Directory -Force $box | Out-Null
+          Copy-Item KnoxMap.exe $box
+          # A stand-in for Setup.bat that makes the environment the launcher
+          # is looking for, and leaves a mark to say it ran.
+          @'
+          @echo off
+          echo setup ran > "%~dp0setup-ran.txt"
+          mkdir "%~dp0.venv\Scripts" 2>nul
+          copy /y "%SystemRoot%\System32\cmd.exe" "%~dp0.venv\Scripts\pythonw.exe" >nul
+          exit /b 0
+          '@ | Set-Content -Encoding ascii (Join-Path $box 'Setup.bat')
+          # knoxmap.py is never read: pythonw.exe here is a copy of cmd.exe,
+          # and what is checked is that the launcher starts it at all.
+          '/c echo started > started.txt' | Set-Content -Encoding ascii (Join-Path $box 'knoxmap.py')
+          Push-Location $box
+          & .\KnoxMap.exe
+          Start-Sleep -Seconds 8
+          Pop-Location
+          if (-not (Test-Path (Join-Path $box 'setup-ran.txt'))) {
+            throw 'the launcher did not run Setup.bat'
+          }
+          if (-not (Test-Path (Join-Path $box '.venv\Scripts\pythonw.exe'))) {
+            throw 'setup did not leave an environment behind'
+          }
+          Write-Host 'ok: no environment -> Setup ran, environment made'
+
+      - name: It starts the window and exits without holding the file
+        shell: pwsh
+        run: |
+          $box = Join-Path $env:RUNNER_TEMP 'normal-run'
+          New-Item -ItemType Directory -Force (Join-Path $box '.venv\Scripts') | Out-Null
+          Copy-Item KnoxMap.exe $box
+          # pythonw.exe is cmd.exe under another name; the "script" it is
+          # given is a cmd argument that writes a file, so a file appearing
+          # proves the launcher started it with the right arguments.
+          Copy-Item "$env:SystemRoot\System32\cmd.exe" (Join-Path $box '.venv\Scripts\pythonw.exe')
+          '/c echo started > started.txt' | Set-Content -Encoding ascii (Join-Path $box 'knoxmap.py')
+          Push-Location $box
+          $started = Get-Date
+          & .\KnoxMap.exe
+          $took = (Get-Date) - $started
+          Start-Sleep -Seconds 8
+          Pop-Location
+          if (-not (Test-Path (Join-Path $box 'started.txt'))) {
+            throw 'the launcher did not start pythonw.exe with knoxmap.py'
+          }
+          if ($took.TotalSeconds -gt 5) {
+            throw "the launcher waited $($took.TotalSeconds)s instead of exiting"
+          }
+          # It must not hold its own file open, or an update cannot replace it.
+          Set-Content -Path (Join-Path $box 'KnoxMap.exe') -Value 'replaced' -Force
+          Write-Host 'ok: started the window, exited, and can be updated over'

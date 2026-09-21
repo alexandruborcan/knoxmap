@@ -12,7 +12,7 @@ than a second UI that would drift from the web one.
 Compiling uses the patched PZWorldEd_cli.exe that Setup installs (see
 worlded/README.md); without it the app opens WorldEd on the project instead.
 
-Run it with:  pythonw knoxmap.py      (or double-click KnoxMap.bat)
+Run it with:  pythonw knoxmap.py      (or double-click KnoxMap.exe)
 On Linux or macOS:  ./knoxmap.sh
 """
 from __future__ import annotations

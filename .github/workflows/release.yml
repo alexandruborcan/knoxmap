@@ -16,13 +16,22 @@ jobs:
   checks:
     uses: ./.github/workflows/checks.yml
 
+  # Builds KnoxMap.exe and runs it on a Windows runner before anything is
+  # published: the launcher cannot be tested on the machine it is written on.
+  launcher:
+    uses: ./.github/workflows/launcher.yml
+
   release:
-    needs: checks
+    needs: [checks, launcher]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: KnoxMap-exe
 
       - name: Pack one release per system
         run: |
@@ -37,6 +46,11 @@ jobs:
           done
           rm -f pack/windows/KnoxMap/*.sh
           rm -f pack/linux/KnoxMap/*.bat pack/macos/KnoxMap/*.bat
+          # The launcher people double-click, built and run through by the
+          # launcher workflow. It is not in the repository as a binary, and
+          # it is no use on Linux or macOS.
+          cp KnoxMap.exe pack/windows/KnoxMap/
+          rm -rf pack/linux/KnoxMap/win pack/macos/KnoxMap/win
           (cd pack/windows && zip -qr "$GITHUB_WORKSPACE/KnoxMap-$v-windows.zip" KnoxMap)
           (cd pack/linux && tar -czf "$GITHUB_WORKSPACE/KnoxMap-$v-linux.tar.gz" KnoxMap)
           (cd pack/macos && tar -czf "$GITHUB_WORKSPACE/KnoxMap-$v-macos.tar.gz" KnoxMap)
@@ -55,10 +69,14 @@ jobs:
           {
             printf '\n---\n**Install**\n\n'
             printf '| System | Download | Then |\n|---|---|---|\n'
-            printf '| Windows 10/11 | `KnoxMap-%s-windows.zip` | unzip it and double-click `KnoxMap.bat` |\n' "$GITHUB_REF_NAME"
+            printf '| Windows 10/11 | `KnoxMap-%s-windows.zip` | unzip it and double-click `KnoxMap.exe` |\n' "$GITHUB_REF_NAME"
             printf '| Linux | `KnoxMap-%s-linux.tar.gz` | `tar -xzf` it, then `./setup.sh` and `./knoxmap.sh` |\n' "$GITHUB_REF_NAME"
             printf '| macOS | `KnoxMap-%s-macos.tar.gz` | `tar -xzf` it, then `./setup.sh` and `./knoxmap.sh` |\n' "$GITHUB_REF_NAME"
             printf '\nLinux and macOS need 64-bit Python 3.10+ of your own; see LINUX.md.\n'
+            printf '\n`KnoxMap.exe` finds Python, runs setup the first time and opens\n'
+            printf 'the window. `KnoxMap.bat` is still in the folder and does the same,\n'
+            printf 'for anyone who would rather read what they are running. Windows may\n'
+            printf 'warn about an unsigned program the first time: More info, Run anyway.\n'
           } >> notes.md
 
       - name: Publish

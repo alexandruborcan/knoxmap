@@ -113,7 +113,7 @@ already has. See [LINUX.md](LINUX.md).
    `KnoxMap-v…-windows.zip` on Windows, `…-linux.tar.gz` or `…-macos.tar.gz`
    elsewhere — and unpack it anywhere. (Or `git clone` it for the latest
    changes.)
-2. **Double-click `KnoxMap.bat`.** The first time, it runs setup for you, which:
+2. **Double-click `KnoxMap.exe`.** The first time, it runs setup for you, which:
    - uses your Python 3.10+ if you have one, or downloads the official python.org
      build (checked against its fingerprint) into the folder if not,
    - creates a private Python environment inside the KnoxMap folder,
@@ -124,7 +124,7 @@ already has. See [LINUX.md](LINUX.md).
      drive: name it when setup asks, or later under *Settings > Steam libraries*),
    - adds the rules for kerbs, road markings and Build 42 trees to the map tools.
 
-   It takes a few minutes, once. After that `KnoxMap.bat` opens straight away.
+   It takes a few minutes, once. After that `KnoxMap.exe` opens straight away.
 3. **Make a map** in the window that opens:
    1. **Choose an area** (see below). Start small, a few streets, while you get a
       feel for it.
