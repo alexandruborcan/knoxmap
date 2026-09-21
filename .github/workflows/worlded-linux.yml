@@ -12,6 +12,14 @@ name: worlded-linux
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish it as a release (tag below)'
+        type: boolean
+        default: false
+      tag:
+        description: 'Release tag'
+        default: 'worlded-cli-linux-20260909f'
   push:
     paths:
       - 'worlded/**'
@@ -145,6 +153,70 @@ jobs:
             { echo "no build banner - this is not WorldEd running"; exit 1; }
           echo "ok: the native build loads and runs WorldEd's own code"
 
+      - name: Its source, and the licences it has to carry
+        run: |
+          out=pack/PZWorldEd_cli-linux-x86_64
+          # GPL-2.0 section 3: a modified program may be passed on as a binary
+          # only with its complete corresponding source, from the same place.
+          # A link to upstream is not that - upstream can move or vanish - so
+          # the patched tree travels with it (worlded/make_release.py says the
+          # same for the Windows build).
+          rm -rf src/.git
+          mkdir -p "$out/source"
+          cp -r src "$out/source/PZ_Mapping_Tools"
+          cp worlded/patch_worlded_cli.py worlded/patch_worlded_linux.py "$out/source/"
+          cp .github/workflows/worlded-linux.yml "$out/source/how-it-was-built.yml"
+          cp src/COPYING "$out/LICENSE-GPL-2.0.txt" 2>/dev/null ||
+            cp src/licenses/GPL-2.0.txt "$out/LICENSE-GPL-2.0.txt"
+          # Unlike the Windows build, this one carries Qt with it, and Qt is
+          # LGPL-3. It is carried as separate shared libraries that anyone can
+          # replace with their own, which is what the LGPL asks for.
+          cp /usr/share/common-licenses/LGPL-3 "$out/LICENSE-LGPL-3.0.txt"
+          qtver=$(dpkg-query -W -f='${Version}' libqt5core5a)
+          cat > "$out/README-RELEASE.txt" <<EOF
+          PZWorldEd_cli for Linux - built ${COMMIT}
+
+          A build of PZWorldEd from PZ Mapping Tools
+          (https://github.com/Unjammer/PZ_Mapping_Tools) at commit ${COMMIT},
+          with two patches by KnoxMap (https://github.com/spytheeuclidean-a11y/knoxmap):
+
+            patch_worlded_cli.py    adds --generate-map and --cells, so a map
+                                    can be compiled without anyone clicking
+                                    through WorldEd's File menu
+            patch_worlded_linux.py  names the container in QPolygonF's braced
+                                    initialiser, which GCC will not accept as
+                                    it stands
+
+          KnoxMap uses it so that making a map on Linux does not need Wine.
+
+          LICENCE
+          PZ Mapping Tools is GPL-2.0-or-later (LICENSE-GPL-2.0.txt), so this
+          build is too. Its complete corresponding source is in source/ -
+          the whole tree with the patches already applied, the patch scripts,
+          and how-it-was-built.yml, which is the exact recipe.
+
+          lib/ carries Qt ${qtver} from Ubuntu 22.04, which is LGPL-3.0
+          (LICENSE-LGPL-3.0.txt), as separate shared libraries you are free to
+          replace with your own build. Qt's own source is
+
+            apt-get source qtbase-opensource-src
+
+          on Ubuntu 22.04, or https://download.qt.io/archive/qt/5.15/ .
+          Ask at https://github.com/spytheeuclidean-a11y/knoxmap/issues and
+          any of it will be sent to you.
+
+          RUNNING IT
+          It needs a platform plugin, which is in plugins/platforms:
+
+            QT_QPA_PLATFORM=offscreen \
+            QT_QPA_PLATFORM_PLUGIN_PATH=\$PWD/plugins/platforms \
+              ./PZWorldEd_cli --generate-map=/path/to/project.pzw
+
+          KnoxMap sets both for you.
+          EOF
+          sed -i 's/^          //' "$out/README-RELEASE.txt"
+          du -sh "$out"
+
       - name: Tarball
         run: |
           cd pack
@@ -158,3 +230,39 @@ jobs:
             pack/PZWorldEd_cli-linux-x86_64.tar.gz
             pack/SHA256
           if-no-files-found: error
+
+  publish:
+    name: Publish it as a release
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: PZWorldEd_cli-linux-x86_64
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(cut -d' ' -f1 SHA256)
+          gh release create "${{ inputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "PZWorldEd_cli for Linux (${{ inputs.tag }})" \
+            --notes "A native Linux build of the patched map compiler, so
+          KnoxMap does not need Wine to make a map.
+
+          Built from PZ Mapping Tools at \`4e86b80c505b3d77a2fb5f5675b752da966306f6\`
+          with KnoxMap's \`patch_worlded_cli.py\` and \`patch_worlded_linux.py\`,
+          against Qt 5.15 on Ubuntu 22.04. The complete corresponding source is
+          inside the tarball under \`source/\`, with the licences.
+
+          SHA-256: \`$sha\`
+
+          Setup installs this for you; there is nothing to download by hand." \
+            PZWorldEd_cli-linux-x86_64.tar.gz ||
+          gh release upload "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" \
+            --clobber PZWorldEd_cli-linux-x86_64.tar.gz
+          echo "sha256=$sha"
