@@ -2,6 +2,12 @@
 
 ## 1.3.9
 
+- **Only KnoxMap counts as an update.** The map compiler is published from
+  the same repository, and its tags are dates, so a compiler release could
+  become GitHub's "latest" and the updater would read
+  `worlded-cli-linux-20260909f` as version 20260909 and offer it to you. It
+  now checks that a tag is a version before believing it.
+
 - **Linux does not need Wine any more.** Setup now fetches a map compiler
   built for Linux - the same program, from the same source at the same
   commit, with the Qt it needs beside it - checks its fingerprint and puts it
