@@ -480,7 +480,8 @@ def check_memory_guard(check) -> None:
             small = knoxapp._too_big_for_memory(1200, 1200)
         finally:
             knoxapp.sys = was
-        check(big and "32-bit" in big and "Setup.bat" in big and not small,
+        import knoxpaths as _kp
+        check(big and "32-bit" in big and _kp.setup_command() in big and not small,
               "a map too big for a 32-bit Python is refused with a way out")
         knoxlog.memory_status = lambda: (15_000_000_000, 900_000_000, 140_000_000_000)
         tight = knoxapp._too_big_for_memory(5400, 6000)
