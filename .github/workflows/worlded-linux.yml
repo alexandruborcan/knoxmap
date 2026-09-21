@@ -80,8 +80,11 @@ jobs:
           mkdir -p "$out/lib" "$out/plugins/platforms"
           cp "$exe" "$out/PZWorldEd_cli"
           # WorldEd's own libraries first: libworlded, libtiled and the rest
-          # come out of the build, not from anywhere on the system.
-          find build -name '*.so*' -type f -exec cp -Lv {} "$out/lib/" \;
+          # come out of the build, not from anywhere on the system. Symlinks
+          # and all - libzlib1.so.1.0.0 is the file, and libzlib1.so.1 is the
+          # name the program asks for.
+          find build -name '*.so*' -exec cp -av {} "$out/lib/" \;
+          ls -l "$out/lib" | head -40
           # Headless: the compile draws nothing, so the offscreen plugin is
           # all Qt needs and no X libraries come into it.
           for plugin in libqoffscreen.so libqminimal.so; do
