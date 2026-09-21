@@ -306,3 +306,79 @@ jobs:
             --clobber PZWorldEd_cli-linux-x86_64.tar.gz \
             PZWorldEd_cli-linux-source.zip
           echo "sha256=$sha"
+
+  setup_installs_it:
+    name: Setup installs it, and it runs from where Setup put it
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install -q requests
+
+      - name: Setup fetches the published compiler
+        run: |
+          python - <<'PY'
+          import sys, tempfile
+          from pathlib import Path
+          sys.path.insert(0, ".")
+          import knoxmap_setup
+
+          # The real thing: the pinned URL, the pinned fingerprint, and the
+          # unpacking that a Linux player's Setup does.
+          tools = Path(tempfile.mkdtemp()) / "PZMappingTools"
+          tools.mkdir(parents=True)
+          ok = knoxmap_setup._install_linux_cli(tools)
+          if not ok:
+              raise SystemExit("Setup could not install the Linux compiler")
+          exe = tools / "bin" / "PZWorldEd_cli"
+          for wanted in (exe, tools / "bin" / "lib", tools / "bin" / "plugins" / "platforms"):
+              if not wanted.exists():
+                  raise SystemExit(f"{wanted} is missing from what Setup unpacked")
+          import os, stat
+          if not os.access(exe, os.X_OK):
+              raise SystemExit(f"{exe} is not executable")
+          print(f"TOOLS={tools}")
+          Path("tools-path.txt").write_text(str(tools))
+          PY
+
+      - name: KnoxMap finds it, and calls it native
+        run: |
+          tools=$(cat tools-path.txt)
+          PZMAPPING_TOOLS="$tools" python - "$tools" <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, ".")
+          import knoxpaths
+
+          tools = Path(sys.argv[1])
+          cli = tools / "bin" / "PZWorldEd_cli"
+          if knoxpaths.through_wine(cli):
+              raise SystemExit("KnoxMap thinks the native build needs Wine")
+          if knoxpaths.command_for(cli) != [str(cli)]:
+              raise SystemExit(f"KnoxMap would not run it directly: {knoxpaths.command_for(cli)}")
+          env = knoxpaths.tool_env(cli)
+          if env.get("QT_QPA_PLATFORM") != "offscreen":
+              raise SystemExit("it would not be run headless")
+          if not env.get("QT_QPA_PLATFORM_PLUGIN_PATH", "").endswith("plugins/platforms"):
+              raise SystemExit(f"wrong plugin path: {env.get('QT_QPA_PLATFORM_PLUGIN_PATH')}")
+          here = "/home/runner/maps/town"
+          if knoxpaths.tool_path(here) != here:
+              raise SystemExit("it would still hand the tools a Wine path")
+          print("ok: run directly, headless, with real paths")
+          PY
+
+      - name: And it starts from there
+        run: |
+          tools=$(cat tools-path.txt)
+          export QT_QPA_PLATFORM=offscreen
+          export QT_QPA_PLATFORM_PLUGIN_PATH="$tools/bin/plugins/platforms"
+          set +e
+          timeout 60 "$tools/bin/PZWorldEd_cli" --generate-map=/nonexistent.pzw > run.log 2>&1
+          set -e
+          grep -E 'Installation root|Runtime: Qt' run.log || true
+          grep -q "Installation root $tools\$" run.log ||
+            { echo "wrong installation root"; exit 1; }
+          echo "ok: installed by Setup on a machine with no Qt and no Wine, and it runs"
