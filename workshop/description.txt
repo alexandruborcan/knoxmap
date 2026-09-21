@@ -1,0 +1,90 @@
+[h1]KnoxMap — real places, playable in Project Zomboid[/h1]
+
+Draw a box around your town on a map and get a Build 42 map mod of it: the
+real streets, the real buildings, furnished inside, with loot, zombies and
+cars where they belong.
+
+[b]KnoxMap is a program you run on your own PC, not a subscription.[/b] It is
+free and open source, and it lives here:
+
+[url=https://github.com/spytheeuclidean-a11y/knoxmap/releases/latest][h3]➜ Download KnoxMap from GitHub[/h3][/url]
+
+Windows, Linux and macOS. Unpack it, run it, draw an area, press the four
+buttons. The map appears in your game as its own starting region.
+
+[hr][/hr]
+[h2]What this Workshop item is[/h2]
+
+A small tool that comes with KnoxMap, put here on its own because it is
+useful in any map — including the ones that ship with the game.
+
+[b]Reset loot.[/b] Right-click the ground and pick [i]Reset loot[/i]: every
+container in that building, or everything within 30 tiles, is filled again
+from the game's own loot tables. No new save needed. Useful when you have
+picked a town clean, when you install a map again, or when a map you are
+building changes under you.
+
+It asks before it does anything, and it never touches a vehicle, a corpse or
+anyone's inventory — whatever is inside a container is thrown away first.
+
+[b]It does not generate maps.[/b] That is KnoxMap itself, from the link above.
+
+[hr][/hr]
+[h2]What KnoxMap makes[/h2]
+
+[list]
+[*] [b]The real place.[/b] Streets, pavements, kerbs, road markings, rivers,
+    coastline, woods, railways, bridges and overpasses, from OpenStreetMap.
+[*] [b]Buildings that are buildings.[/b] Every footprint becomes a furnished
+    one on its real outline: houses, blocks of flats, shops with their
+    stockrooms, schools, churches, works, police stations, libraries, fire
+    stations. A parade of shops becomes a parade, not one shed.
+[*] [b]Rooms the game knows.[/b] Loot comes from Project Zomboid's own tables
+    for each room, so a pharmacy is a pharmacy and a gun store is a gun store.
+[*] [b]People, then zombies.[/b] How many lived and worked in each block is
+    worked out from floor area and land use, and the spawn map is drawn from
+    that — busy blocks are busy, and the streets are not empty.
+[*] [b]Cars, petrol pumps, graveyards, army bases[/b], the paper map you open
+    with M, and a spawn point in a house.
+[/list]
+
+[h2]What you need[/h2]
+
+[list]
+[*] Project Zomboid [b]Build 42[/b] — Build 41 cannot load these maps.
+[*] The map tools and the tile artwork, which KnoxMap's own setup fetches and
+    extracts from your copy of the game. Nothing is downloaded from anyone
+    else's.
+[*] [b]Windows, Linux or macOS.[/b] On Linux the map compiler comes built for
+    Linux, so there is no Wine and nothing to install; on macOS the map tools
+    run through Wine.
+[*] Optional: [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3780306632]Elevators[/url]
+    for working lifts, [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3772052709]Spawn Selector[/url]
+    to start at any landmark, and
+    [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3346506593]Erika's Tiles[/url]
+    for glass shop fronts and street signs.
+[/list]
+
+[h2]Where to ask[/h2]
+
+[list]
+[*] [url=https://discord.gg/ePM8dSxPm7]The KnoxMap Discord[/url] — help, bug
+    reports, and people showing their towns.
+[*] [url=https://github.com/spytheeuclidean-a11y/knoxmap/issues]Issues on GitHub[/url].
+[/list]
+
+[hr][/hr]
+[h2]Credits and licence[/h2]
+
+Map data © [url=https://www.openstreetmap.org/copyright]OpenStreetMap[/url]
+contributors, [url=https://opendatacommons.org/licenses/odbl/]ODbL[/url]. Any
+map you make carries that credit, and you keep it if you share the map.
+
+Built on the community's
+[url=https://github.com/Unjammer/PZ_Mapping_Tools]PZ Mapping Tools[/url].
+KnoxMap is MIT licensed. Building interiors, residents and zombie counts are
+invented by the generator and do not describe the real places or anyone
+connected with them.
+
+Thanks to The Indie Stone for Project Zomboid. This is an unofficial fan
+production, not made, endorsed or supported by The Indie Stone.

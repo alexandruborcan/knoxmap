@@ -1,0 +1,4 @@
+name=KnoxMap Tools - Reset loot
+id=KnoxMapTools
+description=Right-click the ground and pick "Reset loot": every container in that building, or everything within 30 tiles, is filled again from the game's own loot tables, without starting a new save. Works in any map, the ones that ship with the game included. It comes with KnoxMap, which turns any real place into a playable Build 42 map - a free program for your PC, at https://github.com/spytheeuclidean-a11y/knoxmap
+poster=poster.png
