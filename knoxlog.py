@@ -131,7 +131,7 @@ def version() -> str:
         for line in (BASE_DIR / "CHANGELOG.md").read_text(encoding="utf-8").splitlines():
             # "1.3.9", and also "1.3.9 mc1" - a release for one system only,
             # which carries the platform and its number after the version.
-            m = re.match(r"##\s+(\d[\w.]*(?:\s+[a-z]+\d+)?)", line)
+            m = re.match(r"##\s+(\d[\w.]*(?:\s+[a-z]+\d*)?)", line)
             if m:
                 return m.group(1)
     except OSError:

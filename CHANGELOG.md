@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.9 rnd
 
 - **A picture of your map.** Once a map is compiled there is a *Draw a
   picture of it* button beside the download: the whole town, the middle of it

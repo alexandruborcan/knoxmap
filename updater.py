@@ -81,8 +81,23 @@ def current_version() -> str:
     return knoxlog.version()
 
 
-def _parse(version: str) -> tuple[int, ...]:
-    return tuple(int(p) for p in re.findall(r"\d+", version or "")[:4]) or (0,)
+# A version, and the named releases that sit on top of one: "1.3.9 mc1" was
+# the macOS fix, "1.3.9 rnd" the pictures. A name with no number after it
+# counts as the first release past the plain version, and two names on the
+# same version fall in the name's own order - arbitrary, but the same answer
+# on every PC, which is what matters for deciding who gets offered what.
+_SUFFIX = re.compile(r"[ -]([a-z]+)(\d*)$", re.I)
+
+
+def _parse(version: str) -> tuple:
+    text = (version or "").strip()
+    name, number = "", 0
+    found = _SUFFIX.search(text)
+    if found:
+        name, number = found.group(1).lower(), int(found.group(2) or 1)
+        text = text[:found.start()]
+    numbers = tuple(int(p) for p in re.findall(r"\d+", text)[:4]) or (0,)
+    return (numbers, number, name)
 
 
 def is_newer(latest: str, current: str) -> bool:
@@ -211,7 +226,7 @@ def _open_release(path: Path) -> _Bundle:
 # of Qt as an upgrade. Only a tag that is a version is a release of KnoxMap.
 # "v1.3.9", and "v1.3.9-mc1" - a release for one system only, which carries
 # the system and its number after the version.
-VERSION_TAG = re.compile(r"v?\d+(?:\.\d+){0,3}(?:-[a-z]+\d+)?$")
+VERSION_TAG = re.compile(r"v?\d+(?:\.\d+){0,3}(?:-[a-z]+\d*)?$")
 
 
 def _is_knoxmap(release: dict) -> bool:

@@ -538,6 +538,18 @@ def check_portable(check) -> None:
           and not updater._is_knoxmap({"tag_name": "v1.3.9", "prerelease": True})
           and not updater._is_knoxmap({"tag_name": "v1.4.0", "draft": True}),
           "a released version of KnoxMap is, and a draft or a pre-release is not")
+
+    # A release can be named on top of a version - "1.3.9 mc1" was the macOS
+    # fix, "1.3.9 rnd" the pictures - and has to come out newer than the
+    # version it sits on, or nobody is ever offered it.
+    order = [("1.3.9 rnd", "1.3.9"), ("1.3.9 mc1", "1.3.9"),
+             ("1.3.9 rnd", "1.3.9 mc1"), ("1.3.10", "1.3.9 rnd")]
+    check(all(updater.is_newer(a, b) for a, b in order)
+          and not updater.is_newer("1.3.9", "1.3.9 rnd")
+          and not updater.is_newer("1.3.9", "1.3.9"),
+          "a named release is newer than the version it is named after")
+    check(updater._is_knoxmap({"tag_name": "v1.3.9-rnd"}),
+          "and its tag is recognised as one of ours")
     check((updater._asset({"assets": [{"name": "KnoxMap-v1.3.6.zip"}]}) or {}).get("name")
           == "KnoxMap-v1.3.6.zip",
           "and a release from before they were split is still for everybody")

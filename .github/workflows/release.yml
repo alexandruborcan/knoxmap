@@ -42,15 +42,14 @@ jobs:
         run: |
           set -eu
           v="${GITHUB_REF_NAME}"
-          case "$v" in
-            *-*)
-              case "${v##*-}" in
-                mac*|mc*)     systems=macos ;;
-                win*|w[0-9]*) systems=windows ;;
-                lin*|l[0-9]*) systems=linux ;;
-                *) echo "no system named in $v - use -mc1, -win1 or -lin1"; exit 1 ;;
-              esac ;;
-            *) systems="windows linux macos" ;;
+          # A suffix that names a system means that system alone. Any other
+          # suffix is just a name for the release - v1.3.9-rnd was the
+          # pictures - and goes out to everybody, same as a bare version.
+          case "${v##*-}" in
+            mac*|mc*)     systems=macos ;;
+            win*|w[0-9]*) systems=windows ;;
+            lin*|l[0-9]*) systems=linux ;;
+            *)            systems="windows linux macos" ;;
           esac
           echo "systems=$systems" >> "$GITHUB_OUTPUT"
           echo "$v is for: $systems"
