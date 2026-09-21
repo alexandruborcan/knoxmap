@@ -153,6 +153,33 @@ jobs:
             { echo "no build banner - this is not WorldEd running"; exit 1; }
           echo "ok: the native build loads and runs WorldEd's own code"
 
+      - name: It finds the tools folder from bin/, the way the Windows one does
+        run: |
+          # Setup unpacks this into PZMappingTools/bin, beside where the
+          # Windows build goes, because WorldEd takes the folder ABOVE bin as
+          # its installation root - that is where config/, Tiles/ and
+          # settings/ live. On Windows the log says so plainly:
+          #   Installation root ...\PZMappingTools
+          # for an exe at ...\PZMappingToolsin\PZWorldEd_cli.exe. If the
+          # Linux build resolved it to bin/ instead it would find no artwork
+          # and no configuration, and every compile would fail - so it is
+          # checked here rather than on somebody's PC.
+          rm -rf fake && mkdir -p fake/PZMappingTools/bin fake/PZMappingTools/config
+          cp -a pack/PZWorldEd_cli-linux-x86_64/. fake/PZMappingTools/bin/
+          root=$(cd fake/PZMappingTools && pwd)
+          export QT_QPA_PLATFORM=offscreen
+          export QT_QPA_PLATFORM_PLUGIN_PATH="$root/bin/plugins/platforms"
+          set +e
+          timeout 60 "$root/bin/PZWorldEd_cli" --generate-map=/nonexistent.pzw > root.log 2>&1
+          set -e
+          grep -E 'Installation root|Application configuration' root.log || true
+          said=$(grep -m1 'Installation root' root.log | sed 's/.*Installation root //')
+          [ -n "$said" ] || { echo "it never said where its installation root is"; exit 1; }
+          [ "$said" = "$root" ] ||
+            { echo "it took $said as its root, not $root - Setup is putting it in the wrong place";
+              exit 1; }
+          echo "ok: from bin/ it resolves the tools folder above, like the Windows build"
+
       - name: Its source, and the licences it has to carry
         run: |
           out=pack/PZWorldEd_cli-linux-x86_64
