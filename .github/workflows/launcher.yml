@@ -50,24 +50,24 @@ jobs:
       - name: It runs Setup when there is no environment yet
         shell: pwsh
         run: |
+          $python = (Get-Command python).Source
           $box = Join-Path $env:RUNNER_TEMP 'first-run'
           New-Item -ItemType Directory -Force $box | Out-Null
           Copy-Item KnoxMap.exe $box
-          # A stand-in for Setup.bat that makes the environment the launcher
-          # is looking for, and leaves a mark to say it ran.
-          @'
+          # A stand-in for Setup.bat: it leaves the environment the launcher
+          # is looking for, and a mark to say it ran.
+          @"
           @echo off
           echo setup ran > "%~dp0setup-ran.txt"
           mkdir "%~dp0.venv\Scripts" 2>nul
-          copy /y "%SystemRoot%\System32\cmd.exe" "%~dp0.venv\Scripts\pythonw.exe" >nul
+          copy /y "$python" "%~dp0.venv\Scripts\pythonw.exe" >nul
           exit /b 0
-          '@ | Set-Content -Encoding ascii (Join-Path $box 'Setup.bat')
-          # knoxmap.py is never read: pythonw.exe here is a copy of cmd.exe,
-          # and what is checked is that the launcher starts it at all.
-          '/c echo started > started.txt' | Set-Content -Encoding ascii (Join-Path $box 'knoxmap.py')
+          "@ | Set-Content -Encoding ascii (Join-Path $box 'Setup.bat')
+          "open('started.txt','w').write('started')" |
+            Set-Content -Encoding ascii (Join-Path $box 'knoxmap.py')
           Push-Location $box
           & .\KnoxMap.exe
-          Start-Sleep -Seconds 8
+          Start-Sleep -Seconds 10
           Pop-Location
           if (-not (Test-Path (Join-Path $box 'setup-ran.txt'))) {
             throw 'the launcher did not run Setup.bat'
@@ -75,24 +75,28 @@ jobs:
           if (-not (Test-Path (Join-Path $box '.venv\Scripts\pythonw.exe'))) {
             throw 'setup did not leave an environment behind'
           }
-          Write-Host 'ok: no environment -> Setup ran, environment made'
+          if (-not (Test-Path (Join-Path $box 'started.txt'))) {
+            throw 'the launcher ran Setup but never started the window'
+          }
+          Write-Host 'ok: no environment -> Setup ran, then the window started'
 
       - name: It starts the window and exits without holding the file
         shell: pwsh
         run: |
+          $python = (Get-Command python).Source
           $box = Join-Path $env:RUNNER_TEMP 'normal-run'
           New-Item -ItemType Directory -Force (Join-Path $box '.venv\Scripts') | Out-Null
           Copy-Item KnoxMap.exe $box
-          # pythonw.exe is cmd.exe under another name; the "script" it is
-          # given is a cmd argument that writes a file, so a file appearing
-          # proves the launcher started it with the right arguments.
-          Copy-Item "$env:SystemRoot\System32\cmd.exe" (Join-Path $box '.venv\Scripts\pythonw.exe')
-          '/c echo started > started.txt' | Set-Content -Encoding ascii (Join-Path $box 'knoxmap.py')
+          # The real thing: pythonw.exe running knoxmap.py, which here only
+          # writes a file and ends.
+          Copy-Item $python (Join-Path $box '.venv\Scripts\pythonw.exe')
+          "open('started.txt','w').write('started')" |
+            Set-Content -Encoding ascii (Join-Path $box 'knoxmap.py')
           Push-Location $box
           $started = Get-Date
           & .\KnoxMap.exe
           $took = (Get-Date) - $started
-          Start-Sleep -Seconds 8
+          Start-Sleep -Seconds 10
           Pop-Location
           if (-not (Test-Path (Join-Path $box 'started.txt'))) {
             throw 'the launcher did not start pythonw.exe with knoxmap.py'
@@ -103,3 +107,4 @@ jobs:
           # It must not hold its own file open, or an update cannot replace it.
           Set-Content -Path (Join-Path $box 'KnoxMap.exe') -Value 'replaced' -Force
           Write-Host 'ok: started the window, exited, and can be updated over'
+
