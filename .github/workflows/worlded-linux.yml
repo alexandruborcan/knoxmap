@@ -161,11 +161,15 @@ jobs:
           # A link to upstream is not that - upstream can move or vanish - so
           # the patched tree travels with it (worlded/make_release.py says the
           # same for the Windows build).
+          # Beside the binary on the release page rather than inside it:
+          # the source is most of the weight and nobody running a map needs
+          # to download it (the Windows release is laid out the same way).
           rm -rf src/.git
-          mkdir -p "$out/source"
-          cp -r src "$out/source/PZ_Mapping_Tools"
-          cp worlded/patch_worlded_cli.py worlded/patch_worlded_linux.py "$out/source/"
-          cp .github/workflows/worlded-linux.yml "$out/source/how-it-was-built.yml"
+          mkdir -p srcpack
+          cp -r src srcpack/PZ_Mapping_Tools
+          cp worlded/patch_worlded_cli.py worlded/patch_worlded_linux.py srcpack/
+          cp .github/workflows/worlded-linux.yml srcpack/how-it-was-built.yml
+          (cd srcpack && zip -qr ../pack/PZWorldEd_cli-linux-source.zip .)
           cp src/COPYING "$out/LICENSE-GPL-2.0.txt" 2>/dev/null ||
             cp src/licenses/GPL-2.0.txt "$out/LICENSE-GPL-2.0.txt"
           # Unlike the Windows build, this one carries Qt with it, and Qt is
@@ -191,9 +195,10 @@ jobs:
 
           LICENCE
           PZ Mapping Tools is GPL-2.0-or-later (LICENSE-GPL-2.0.txt), so this
-          build is too. Its complete corresponding source is in source/ -
-          the whole tree with the patches already applied, the patch scripts,
-          and how-it-was-built.yml, which is the exact recipe.
+          build is too. Its complete corresponding source is on the same
+          release page, as PZWorldEd_cli-linux-source.zip: the whole tree with
+          the patches already applied, the patch scripts, and
+          how-it-was-built.yml, which is the exact recipe.
 
           lib/ carries Qt ${qtver} from Ubuntu 22.04, which is LGPL-3.0
           (LICENSE-LGPL-3.0.txt), as separate shared libraries you are free to
@@ -221,13 +226,15 @@ jobs:
         run: |
           cd pack
           tar czf PZWorldEd_cli-linux-x86_64.tar.gz PZWorldEd_cli-linux-x86_64
-          sha256sum PZWorldEd_cli-linux-x86_64.tar.gz | tee SHA256
+          sha256sum PZWorldEd_cli-linux-x86_64.tar.gz PZWorldEd_cli-linux-source.zip | tee SHA256
+          ls -lh *.tar.gz *.zip
 
       - uses: actions/upload-artifact@v4
         with:
           name: PZWorldEd_cli-linux-x86_64
           path: |
             pack/PZWorldEd_cli-linux-x86_64.tar.gz
+            pack/PZWorldEd_cli-linux-source.zip
             pack/SHA256
           if-no-files-found: error
 
@@ -247,7 +254,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sha=$(cut -d' ' -f1 SHA256)
+          sha=$(grep 'tar.gz' SHA256 | cut -d' ' -f1)
           gh release create "${{ inputs.tag }}" \
             --repo "$GITHUB_REPOSITORY" \
             --title "PZWorldEd_cli for Linux (${{ inputs.tag }})" \
@@ -259,7 +266,7 @@ jobs:
           against Qt 5.15 on Ubuntu 22.04. The complete corresponding source is
           inside the tarball under \`source/\`, with the licences.
 
-          SHA-256: \`$sha\`
+          SHA-256 of the tarball: \`$sha\`
 
           Setup installs this for you; there is nothing to download by hand." \
             PZWorldEd_cli-linux-x86_64.tar.gz ||
