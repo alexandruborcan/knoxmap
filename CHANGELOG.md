@@ -2,6 +2,12 @@
 
 ## 1.3.9 rnd
 
+- **The updater could not see a named release.** It matched a download by
+  its filename, and the pattern had no room for a name in it, so
+  `KnoxMap-v1.3.9-mc1-macos.tar.gz` looked like nothing at all - the macOS
+  fix was on GitHub and no Mac was ever offered it. Fixed here, which means
+  it works from this release on; 1.3.9 mc1 has to be downloaded by hand.
+
 - **A picture of your map.** Once a map is compiled there is a *Draw a
   picture of it* button beside the download: the whole town, the middle of it
   close enough to see, and that same middle with the roofs off, which is how

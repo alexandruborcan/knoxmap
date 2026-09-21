@@ -526,6 +526,15 @@ def check_portable(check) -> None:
     want = "windows" if windows else ("macos" if sys.platform == "darwin" else "linux")
     picked = (updater._asset(three) or {}).get("name", "")
     check(want in picked, f"the updater takes the release built for this system ({picked})")
+    named = {"assets": [{"name": "KnoxMap-v9.9-rnd-windows.zip"},
+                        {"name": "KnoxMap-v9.9-rnd-linux.tar.gz"},
+                        {"name": "KnoxMap-v9.9-rnd-macos.tar.gz"}]}
+    # A named release puts the name in the filename too, and the name must not
+    # be mistaken for the system - a Linux PC handed the Windows zip is worse
+    # than no update at all.
+    got = (updater._asset(named) or {}).get("name", "")
+    check(want in got and got.endswith(".zip" if windows else ".tar.gz"),
+          f"and from a named release too ({got})")
 
     # The map compiler is published from this repository too, and its tags are
     # dates: "worlded-cli-linux-20260909f" read as a version is 20260909, far

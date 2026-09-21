@@ -55,8 +55,12 @@ def _platform_tag() -> str:
     return "macos" if sys.platform == "darwin" else "linux"
 
 
+# KnoxMap-v1.3.9-windows.zip, and the named releases:
+# KnoxMap-v1.3.9-rnd-windows.zip. The name must not swallow the system,
+# or a Linux PC is handed the Windows zip, so it cannot be one of them.
 ASSET_NAME = re.compile(
-    r"KnoxMap-v[\w.]+(-(?P<system>windows|linux|macos))?\.(?P<kind>zip|tar\.gz)")
+    r"KnoxMap-v[\w.]+(?:-(?!windows|linux|macos)[a-z]+\d*)?"
+    r"(-(?P<system>windows|linux|macos))?\.(?P<kind>zip|tar\.gz)")
 UPDATE_DIR = BASE_DIR / "update"
 STAGED = UPDATE_DIR / "staged.json"
 MANIFEST = BASE_DIR / ".knoxmap_files.json"
