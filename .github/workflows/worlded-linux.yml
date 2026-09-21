@@ -48,6 +48,9 @@ jobs:
       - name: KnoxMap's headless patch
         run: python3 worlded/patch_worlded_cli.py src
 
+      - name: And what GCC will not build as it stands
+        run: python3 worlded/patch_worlded_linux.py src
+
       - name: Build
         run: |
           mkdir -p build
