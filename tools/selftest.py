@@ -348,8 +348,22 @@ def check_stop(check) -> None:
     check("should_stop" in inspect.signature(compiler.compile_map).parameters
           and "_run_batch" in src,
           "the compile watches for a stop inside a batch, not only between them")
-    check("terminate" in inspect.getsource(compiler._run_batch),
+    batch = inspect.getsource(compiler._run_batch)
+    check("terminate" in inspect.getsource(compiler._end_batch),
           "and closes WorldEd down rather than waiting it out")
+    # Under Wine the tools' pipes are inherited by wineserver, which outlives
+    # them: reading those to the end never ended, so a dead WorldEd left the
+    # window compiling for ever and Stop could not get out of it either.
+    check("PIPE" not in batch and "communicate" not in batch
+          and "proc.wait(" in batch,
+          "a batch is waited for by the process, never by its pipes")
+    check("killpg" in inspect.getsource(compiler._end_batch)
+          and "start_new_session" in batch,
+          "and off Windows the whole group goes, since `wine` is only a launcher")
+    for source in (batch, inspect.getsource(compiler._end_batch)):
+        waits = re.findall(r"\.wait\(([^)]*)\)", source)
+        check(waits and all("timeout" in w for w in waits),
+              "nothing in a batch waits without a deadline")
 
 
 def check_portable(check) -> None:

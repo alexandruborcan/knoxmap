@@ -2,6 +2,21 @@
 
 ## 1.3.9
 
+- **A compile that never ended on Linux.** WorldEd would die mid-compile and
+  the window would carry on saying "compiling" for ever - nothing running,
+  no error, and Stop did nothing either. KnoxMap was waiting for WorldEd's
+  output to finish rather than for WorldEd, and off Windows the tools are
+  started by `wine`, which hands their pipes to wineserver. wineserver
+  outlives everything it runs, so the pipes never closed and the wait never
+  returned; Stop was stuck on the same pipes.
+
+  A batch now writes to files and is waited for by the process, which cannot
+  get stuck that way on any system, and nothing waits without a deadline.
+  Because `wine` is only a launcher and killing it leaves the program
+  running, a batch is also given a process group of its own and the whole
+  group is ended together - so Stop stops it, and a crashed WorldEd is
+  reported as the error it is, with the path to its log.
+
 - **Windows with no wall behind them.** A window in Project Zomboid is a
   frame and a pane of glass with nothing behind it: the hole it sits in is a
   tile of the wall's own, and there is one per window style. The wall lists

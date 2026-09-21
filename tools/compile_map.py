@@ -16,8 +16,10 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -34,6 +36,36 @@ BATCH_TIMEOUT = 2 * 3600
 STOP_POLL_SECONDS = 1.0
 
 
+# Off Windows the tools are started by `wine`, which is a launcher: it hands
+# the program to wineserver and the program is not its child. Killing the
+# launcher leaves WorldEd running, so a batch is given a process group of its
+# own and the whole group is ended together.
+_OWN_GROUP = os.name != "nt"
+
+
+def _end_batch(proc) -> None:
+    """End a batch, and anything it started with it. Never waits for ever."""
+    def send(hard: bool) -> None:
+        try:
+            if _OWN_GROUP:
+                os.killpg(os.getpgid(proc.pid),
+                          signal.SIGKILL if hard else signal.SIGTERM)
+            elif hard:
+                proc.kill()
+            else:
+                proc.terminate()
+        except OSError:            # already gone, or not ours to signal
+            pass
+
+    for hard, grace in ((False, 20), (True, 10)):
+        send(hard)
+        try:
+            proc.wait(timeout=grace)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
 def _run_batch(cmd, should_stop, started: float):
     """Run one WorldEd batch, watching for a stop while it works.
 
@@ -41,27 +73,49 @@ def _run_batch(cmd, should_stop, started: float):
     only be stopped between batches - and one batch of a big map is minutes.
     This waits in short steps instead, and when the window asks it to stop it
     closes WorldEd down and raises.
+
+    WorldEd's output goes to files rather than pipes, and what is waited for
+    is the process, not the output. Under Wine the pipes are inherited by
+    wineserver, which outlives everything it runs: after WorldEd died the
+    pipes stayed open, so reading them to the end never ended. The window sat
+    on "compiling" with nothing running at all, and Stop could not get out of
+    it either, because closing the batch down read those same pipes. Waiting
+    on the process alone cannot get stuck that way, on any system.
     """
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            text=True, encoding="utf-8", errors="replace")
-    while True:
-        try:
-            out, err = proc.communicate(timeout=STOP_POLL_SECONDS)
-            return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
-        except subprocess.TimeoutExpired:
-            pass
-        if should_stop is not None and should_stop():
-            proc.terminate()
+    def scratch():
+        return tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace")
+
+    with scratch() as out_f, scratch() as err_f:
+        proc = subprocess.Popen(cmd, stdout=out_f, stderr=err_f,
+                                **({"start_new_session": True} if _OWN_GROUP else {}))
+
+        def said() -> tuple[str, str]:
+            """Whatever WorldEd wrote, however it ended."""
+            texts = []
+            for handle in (out_f, err_f):
+                try:
+                    handle.seek(0)
+                    texts.append(handle.read())
+                except OSError:
+                    texts.append("")
+            return texts[0], texts[1]
+
+        while True:
             try:
-                proc.communicate(timeout=20)
+                proc.wait(timeout=STOP_POLL_SECONDS)
             except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.communicate()
-            raise knoxstop.Stopped("the compile")
-        if time.time() - started > BATCH_TIMEOUT:
-            proc.kill()
-            proc.communicate()
-            raise subprocess.TimeoutExpired(cmd, BATCH_TIMEOUT)
+                pass
+            else:
+                out, err = said()
+                return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+            if should_stop is not None and should_stop():
+                _end_batch(proc)
+                raise knoxstop.Stopped("the compile")
+            if time.time() - started > BATCH_TIMEOUT:
+                _end_batch(proc)
+                raise subprocess.TimeoutExpired(cmd, BATCH_TIMEOUT,
+                                                output=said()[0], stderr=said()[1])
+
 
 DEFAULT_EXE = knoxpaths.worlded_cli() or Path("PZWorldEd_cli.exe")
 
