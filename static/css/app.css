@@ -137,6 +137,24 @@ input[readonly] { background: var(--bg); color: var(--muted); }
   font-size: 18px; color: var(--faint); cursor: pointer;
 }
 
+/* A dot on the version when a newer one is out, and again when one has
+   downloaded and is waiting for a restart. */
+/* The version and its dot stay on one line however narrow the bar is. */
+.version { white-space: nowrap; }
+
+.version-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: #a5e266;
+  vertical-align: 2px;
+  box-shadow: 0 0 0 2px rgba(165, 226, 102, 0.22);
+}
+.version-dot[hidden] { display: none; }
+.version-dot.ready { background: #ffc857; box-shadow: 0 0 0 2px rgba(255, 200, 87, 0.22); }
+
 .btn-stop {
   border-color: #8a3b3b;
   color: #ffb4b4;

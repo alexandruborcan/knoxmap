@@ -34,6 +34,12 @@ def default_mods_dir() -> str:
     return str(knoxpaths.zomboid_user_dir() / "mods")
 
 
+def knoxpaths_module():
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import knoxpaths
+    return knoxpaths
+
+
 def collect(project_dir: str, lots_dir: str) -> tuple[list[str], list[str]]:
     """Compiled cell files, and the loose Lua/XML files WorldEd wrote."""
     cells = []
@@ -556,8 +562,14 @@ def package(project_dir: str, name: str, mod_id: str,
     # A map built with Erika's Tiles cannot load without it. The compiled
     # headers list every tile the map uses - buildings, shop signs and the
     # street signs alike.
+    #
+    # The value is the other mod's id, exactly as its own mod.info spells it
+    # and with nothing in front of it: this said "require=\Erikas_Tiles",
+    # which matches no mod at all, so the game let the map load with the
+    # tiles missing. A missing tile draws as nothing, which is why players
+    # saw shop fronts and walls they could see straight through.
     if any(f.endswith(".lotheader") and b"_erika_" in open(f, "rb").read() for f in cells):
-        info += "require=\\Erikas_Tiles\n"
+        info += f"require={knoxpaths_module().ERIKAS_TILES_MOD_ID}\n"
     os.makedirs(os.path.join(mod_root, "42"), exist_ok=True)
     for where in ("", "common", "42"):
         with open(os.path.join(mod_root, where, "mod.info"), "w",

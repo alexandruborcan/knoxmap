@@ -1,6 +1,43 @@
 # Changelog
 
-## Unreleased
+## 1.3.7
+
+- **A town with no zombies in it.** The project told WorldEd where the zombie
+  spawn map was by its bare file name, in the same block whose export folder
+  had to be made absolute for exactly this reason — so WorldEd looked for it
+  beside its own executable, found nothing, and baked every map with no
+  zombies at all. Measured on the same map compiled both ways: sixteen
+  chunkdata files and 23,054 bytes of zombie data with the fix, and none
+  without it. Maps already made need Compile and Install again.
+- **Walls you can see straight through.** A map built with Erika's Tiles
+  said `require=\Erikas_Tiles` in its mod.info. No mod has that id — the id
+  is `Erikas_Tiles`, with nothing in front of it — so the game neither
+  insisted on the mod nor loaded it before the map, and every tile from it
+  came out missing. One compiled cell of the test town names Erika's tiles
+  276 times, which is how much of a building can simply not be there.
+- **The version menu says what to do at the top**, with the Update or
+  Restart button beside it, instead of under every release there has ever
+  been. The version in the corner wears a dot when a newer one is out, and
+  an amber one when it has downloaded and only a restart is left. (Thanks
+  Pwnagee.)
+- **Upgrading a map kept its settings.** The window sent none at all when it
+  redid a map for a new release, so one drawn with Knox County roads, a tree
+  density or a scale of its own came back with the defaults — and then saved
+  them over the map's own.
+- **A house from an address no longer sits on the road.** Mappers put an
+  address point anywhere from the doorstep to the middle of the carriageway,
+  and 1.3.6 built the house where the point was; a street of them read as a
+  road that had gone missing. Each one is now pushed back off the nearest
+  road until it is clear, and left out if it cannot be. How many houses came
+  from addresses is in the map's info file and the log, so "it made none of
+  mine" is a number.
+- **Español and Türkçe**, in the language menu. Spanish came from a player -
+  thank you. `lang/english.txt` is still the file to copy for any other.
+- **A download per system**: `KnoxMap-v…-windows.zip`,
+  `…-linux.tar.gz`, `…-macos.tar.gz`. The tarballs keep the executable bit
+  a zip cannot, so `./setup.sh` runs straight out of one, and each carries
+  only the launchers for its own system. The in-app updater takes the file
+  built for the PC it is running on, and older releases still install.
 
 - **Linux and macOS.** `./setup.sh` once, `./knoxmap.sh` after that. Drawing
   the terrain, the buildings, the paper map and installing the mod are all

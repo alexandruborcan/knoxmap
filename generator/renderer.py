@@ -771,6 +771,9 @@ def render(features: Iterable[OSMFeature], south: float, west: float,
             "spawn_density_max": spawn_density,
             "building_count": len(building_feats),
             "feature_count": sum(len(v) for v in buckets.values()),
+            # How many homes came from an address with no building drawn for
+            # it, so "it made none of mine" is a number rather than a guess.
+            "houses_from_addresses": len(addressed),
             "guide_reference": "Thuztor Mapping Guide v0.2",
         }, f, indent=2)
 
@@ -1897,12 +1900,57 @@ ADDRESS_HOUSE_M = (9.0, 11.0)    # frontage, depth: a small detached house
 ADDRESS_CLEAR_M = 4.0            # keep this far off a mapped building
 ADDRESS_APART_M = 7.0            # and this far from the next address point
 MAX_ADDRESS_HOUSES = 40000
+# How far the near wall of the house stands back from the edge of the road.
+#
+# An address is a point on a street, and mappers put it anywhere from the
+# doorstep to the middle of the carriageway. A house dropped where the point
+# is therefore sat on the road often enough to read as roads going missing.
+# Each one is pushed away from the nearest road until it is clear of it, and
+# dropped if it cannot be.
+ADDRESS_SETBACK_M = 2.0
+ADDRESS_PUSH_M = 18.0            # as far as a house is moved to get clear
+# Every road a house has to stand clear of: the ones with a carriageway. A
+# footpath or a drive may run right past the door.
+ADDRESS_AVOIDS_ROADS = {"road_major", "road_medium", "road_minor", "road_service"}
+
+
+def _off_the_road(x: float, y: float, need: float, roads, road_half,
+                  road_tree, push_limit: float):
+    """Move a point away from the road nearest it until the house round it
+    clears the carriageway. None when it cannot be cleared."""
+    from shapely.geometry import Point
+
+    for _ in range(6):
+        here = Point(x, y)
+        worst, gap = None, 0.0
+        for i in road_tree.query(here.buffer(need + max(road_half, default=0.0))):
+            i = int(i)
+            short = need + road_half[i] - roads[i].distance(here)
+            if short > gap:
+                worst, gap = i, short
+        if worst is None:
+            return x, y
+        # Straight away from the road it is closest to.
+        near = roads[worst].interpolate(roads[worst].project(here))
+        dx, dy = x - near.x, y - near.y
+        length = (dx * dx + dy * dy) ** 0.5
+        if length < 1e-6:
+            return None                  # on the centre line; no way to know
+        step = gap + 0.5
+        if step > push_limit:
+            return None
+        x += dx / length * step
+        y += dy / length * step
+        push_limit -= step
+        if push_limit <= 0:
+            return None
+    return None
 
 
 def _houses_from_addresses(feats: list["OSMFeature"], buildings: list["OSMFeature"],
                            proj: "Projector") -> list["OSMFeature"]:
     """A house-sized footprint for every address that has no building."""
-    from shapely.geometry import Point, Polygon
+    from shapely.geometry import LineString, Point, Polygon
     from shapely.strtree import STRtree
 
     points = [f for f in feats
@@ -1921,6 +1969,20 @@ def _houses_from_addresses(feats: list["OSMFeature"], buildings: list["OSMFeatur
                 if not poly.is_empty:
                     shapes.append(poly)
     tree = STRtree(shapes) if shapes else None
+    # The roads themselves, each as a band of its own width, so a house can
+    # be pushed off the one it belongs to.
+    roads, road_half = [], []
+    for f in feats:
+        cat = classify(f.tags)
+        if cat not in ADDRESS_AVOIDS_ROADS:
+            continue
+        for ring in _feature_coords_px(f, proj):
+            if len(ring) >= 2:
+                roads.append(LineString(ring))
+                road_half.append(_way_width_m(f, cat) / proj.meters_per_tile / 2)
+    road_tree = STRtree(roads) if roads else None
+    setback = ADDRESS_SETBACK_M / proj.meters_per_tile
+    push_limit = ADDRESS_PUSH_M / proj.meters_per_tile
     clear = ADDRESS_CLEAR_M / proj.meters_per_tile
     apart = ADDRESS_APART_M / proj.meters_per_tile
     half_w = (ADDRESS_HOUSE_M[0] / proj.meters_per_tile) / 2
@@ -1940,6 +2002,13 @@ def _houses_from_addresses(feats: list["OSMFeature"], buildings: list["OSMFeatur
             near = tree.query(here.buffer(clear))
             if any(shapes[int(i)].distance(here) <= clear for i in near):
                 continue
+        if road_tree is not None:
+            spot = _off_the_road(x, y, max(half_w, half_h) + setback,
+                                 roads, road_half, road_tree, push_limit)
+            if spot is None:
+                continue                 # nowhere off the road to put it
+            x, y = spot
+            here = Point(x, y)
         key = (int(x // cell), int(y // cell))
         crowd = [p for dx in (-1, 0, 1) for dy in (-1, 0, 1)
                  for p in taken.get((key[0] + dx, key[1] + dy), ())]

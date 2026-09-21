@@ -800,9 +800,16 @@ def generate():
     _write_readme(map_dir, map_name, result)
     _set_progress(map_name, stage="done")
     mapstate.stamp(str(map_dir), "generate")
-    log.info("generate %s: done, %d features, %dx%d tiles, rotation %.1f, %.1fs "
-             "(download %.1fs)", map_name, len(features), result.width, result.height,
-             rotation, time.time() - t0, osm_time)
+    from_addresses = 0
+    try:
+        with open(map_dir / f"{map_name}_info.json", encoding="utf-8") as f:
+            from_addresses = json.load(f).get("houses_from_addresses", 0)
+    except (OSError, ValueError):
+        pass
+    log.info("generate %s: done, %d features, %dx%d tiles, rotation %.1f, "
+             "%d houses from addresses, %.1fs (download %.1fs)", map_name, len(features),
+             result.width, result.height, rotation, from_addresses,
+             time.time() - t0, osm_time)
 
     return jsonify({
         "mapName": map_name,
@@ -850,6 +857,10 @@ def _map_summary(map_dir: Path) -> dict:
         "bbox": info.get("bbox"),
         "metersPerTile": info.get("meters_per_tile", 1.0),
         "shape": info.get("shape"),
+        # The settings this map was made with. Upgrading it sent none at all,
+        # so a map drawn with Knox County roads or a tree density of its own
+        # came back with the defaults and looked like a different town.
+        "settings": _load_settings(map_dir).to_dict(),
         "madeWith": mapstate.made_with(str(map_dir)),
         "current": knoxlog.version(),
         "stages": {k: v.get("version") for k, v in stages.items()},

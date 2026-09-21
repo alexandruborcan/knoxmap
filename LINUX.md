@@ -6,8 +6,17 @@ furnishing the buildings, writing the paper map and installing the mod. Only
 one step needs help, and that is **Compile**, which drives the PZ Mapping
 Tools — Windows programs, run here through Wine.
 
+Download `KnoxMap-v…-linux.tar.gz` (or `…-macos.tar.gz`) from
+[Releases](https://github.com/spytheeuclidean-a11y/knoxmap/releases/latest),
+unpack it, and:
+
+    tar -xzf KnoxMap-v1.3.7-linux.tar.gz
+    cd KnoxMap
     ./setup.sh        once
     ./knoxmap.sh      every time
+
+The tarball keeps the executable bit; a zip does not, which is why the
+downloads are per system.
 
 If the scripts are not executable after a `git clone` or an unzip:
 

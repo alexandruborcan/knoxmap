@@ -232,6 +232,14 @@ def render_pzw(cells_x: int, cells_y: int, bmp_name: str,
         if on_grid(p.cell_x, p.cell_y):
             by_cell.setdefault((p.cell_x, p.cell_y), []).append(p)
 
+    # The zombie spawn map, absolute for the same reason the export folders
+    # below are.
+    #
+    # It sat in the same <GenerateLots> block as <exportdir> and was a bare
+    # file name, so WorldEd looked for it next to its own executable, found
+    # nothing, and baked a town with no zombies in it at all - "I did not
+    # encounter a single one". The name is filled in further down, once the
+    # project folder is known.
     spawn_map = f"{map_name}_ZombieSpawnMap.bmp" if map_name else ""
 
     out = ['<?xml version="1.0" encoding="UTF-8"?>',
@@ -250,6 +258,8 @@ def render_pzw(cells_x: int, cells_y: int, bmp_name: str,
     base = os.path.abspath(project_dir) if project_dir else ""
     tmx_dir = _tool_path(os.path.join(base, "tmx")) if base else "tmx"
     lots_dir = _tool_path(os.path.join(base, "lots")) if base else "lots"
+    if base and spawn_map:
+        spawn_map = _tool_path(os.path.join(base, spawn_map))
 
     out += [
         " <BMPToTMX>",

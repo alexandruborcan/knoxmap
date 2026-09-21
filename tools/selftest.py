@@ -438,6 +438,18 @@ def check_portable(check) -> None:
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
+    # A release carries one file per system; the updater takes the right one.
+    import updater
+    three = {"assets": [{"name": "KnoxMap-v9.9-windows.zip"},
+                        {"name": "KnoxMap-v9.9-linux.tar.gz"},
+                        {"name": "KnoxMap-v9.9-macos.tar.gz"}]}
+    want = "windows" if windows else ("macos" if sys.platform == "darwin" else "linux")
+    picked = (updater._asset(three) or {}).get("name", "")
+    check(want in picked, f"the updater takes the release built for this system ({picked})")
+    check((updater._asset({"assets": [{"name": "KnoxMap-v1.3.6.zip"}]}) or {}).get("name")
+          == "KnoxMap-v1.3.6.zip",
+          "and a release from before they were split is still for everybody")
+
     # The launchers must keep LF, or /bin/sh chokes on the carriage returns.
     root = Path(__file__).resolve().parent.parent
     for name in ("setup.sh", "knoxmap.sh"):
@@ -1100,7 +1112,8 @@ def main(argv: list[str]) -> int:
         with contextlib.redirect_stdout(io.StringIO()):
             mod_root, cells, extras = package(out, "Selftest: Town", "selftest", mods_dir=mods)
         info_erika = open(os.path.join(mod_root, "mod.info"), encoding="utf-8").read()
-        check("require=\\Erikas_Tiles" in info_erika, "a map using Erika's tiles requires Erika's Tiles")
+        check("require=Erikas_Tiles" in info_erika and "require=\\" not in info_erika,
+              "a map using Erika's tiles requires the mod by its own id")
         check(os.path.isdir(os.path.join(mod_root, "common", "media", "maps", "Selftest Town")),
               "map folder name is safe for Windows")
         lua_dir = os.path.join(mod_root, "common", "media", "lua", "shared", "KnoxMap")

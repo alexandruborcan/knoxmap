@@ -108,9 +108,11 @@ and you need your own 64-bit Python 3.10+. Everything works; Compile runs the
 map tools through Wine, which a PC playing Project Zomboid through Proton
 already has. See [LINUX.md](LINUX.md).
 
-1. **Download KnoxMap**: the newest `KnoxMap-v….zip` from
-   [Releases](https://github.com/spytheeuclidean-a11y/knoxmap/releases/latest),
-   then unzip it anywhere. (Or `git clone` it for the latest changes.)
+1. **Download KnoxMap** from
+   [Releases](https://github.com/spytheeuclidean-a11y/knoxmap/releases/latest) —
+   `KnoxMap-v…-windows.zip` on Windows, `…-linux.tar.gz` or `…-macos.tar.gz`
+   elsewhere — and unpack it anywhere. (Or `git clone` it for the latest
+   changes.)
 2. **Double-click `KnoxMap.bat`.** The first time, it runs setup for you, which:
    - uses your Python 3.10+ if you have one, or downloads the official python.org
      build (checked against its fingerprint) into the folder if not,

@@ -236,11 +236,27 @@ const fx = (() => {
   // ---- updates ------------------------------------------------------------
   // updater.py downloads a newer release in the background; once it is
   // ready the header offers a restart, which installs it.
+  // A dot beside the version in the top bar: green when a newer release
+  // exists, amber once it has downloaded and only a restart is left. The
+  // menu is behind a click, so without this nothing on screen said an
+  // update was waiting.
+  function versionDot(state, version) {
+    const dot = $('#versionDot');
+    if (!dot) return;
+    dot.hidden = !state;
+    dot.classList.toggle('ready', state === 'ready');
+    dot.title = state === 'ready'
+      ? `KnoxMap ${version} is downloaded - restart to use it`
+      : `KnoxMap ${version} is out`;
+  }
+
   async function watchUpdates() {
     const box = $('#updateNote');
     if (!box) return;
     let st;
     try { st = await (await fetch('/api/update')).json(); } catch (_) { return; }
+    versionDot(st.state === 'ready' ? 'ready'
+               : (st.latest && st.latest !== st.current ? 'new' : ''), st.latest);
     if (st.state === 'ready') {
       box.hidden = false;
       box.innerHTML = '<span></span> <button type="button">Restart to update</button>';
@@ -361,7 +377,21 @@ const fx = (() => {
       return;
     }
     list.innerHTML = '';
-    if (!data.managed) {
+    const newest = data.releases.find(r => r.latest);
+    if (data.managed && newest && !newest.current && !keepNote) {
+      // The one thing most people opened this menu to do, before the list of
+      // every release there has ever been.
+      versionNote('');
+      const note = $('#versionNote');
+      note.className = 'hint update-ready';
+      note.innerHTML = '<span></span> ';
+      note.querySelector('span').textContent = `KnoxMap ${newest.version} is out.`;
+      const go = document.createElement('button');
+      go.type = 'button';
+      go.textContent = 'Update';
+      go.addEventListener('click', () => chooseVersion(newest, go, data.current));
+      note.append(go);
+    } else if (!data.managed) {
       versionNote('This copy of KnoxMap is a git checkout: switch versions with git.');
     } else if (!data.auto_update && !keepNote) {
       versionNote('Automatic updates are off while you are on an older version. ' +

@@ -26,6 +26,7 @@
 6 m per tile = 6 m per tile
 8 m per tile (whole regions) = 8 m per tile (whole regions)
 a few metres = a few metres
+A newer KnoxMap is out = A newer KnoxMap is out
 already playing, right-click the ground and pick "Reset loot" for = already playing, right-click the ground and pick "Reset loot" for
 an earlier release = an earlier release
 an early release = an early release

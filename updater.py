@@ -45,7 +45,18 @@ BASE_DIR = Path(__file__).resolve().parent
 REPO = "spytheeuclidean-a11y/knoxmap"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 API_RELEASES = f"https://api.github.com/repos/{REPO}/releases?per_page=50"
-ASSET_NAME = re.compile(r"KnoxMap-v[\w.]+\.zip")
+# A release carries one file per system: a zip for Windows, where the zip
+# format is native and nobody has tar, and tarballs for Linux and macOS,
+# which keep the executable bit on setup.sh and knoxmap.sh. Releases up to
+# 1.3.6 had one KnoxMap-v1.3.6.zip for everyone, and that still installs.
+def _platform_tag() -> str:
+    if os.name == "nt":
+        return "windows"
+    return "macos" if sys.platform == "darwin" else "linux"
+
+
+ASSET_NAME = re.compile(
+    r"KnoxMap-v[\w.]+(-(?P<system>windows|linux|macos))?\.(?P<kind>zip|tar\.gz)")
 UPDATE_DIR = BASE_DIR / "update"
 STAGED = UPDATE_DIR / "staged.json"
 MANIFEST = BASE_DIR / ".knoxmap_files.json"
@@ -152,9 +163,65 @@ def check(force: bool = False) -> dict:
     return status()
 
 
+class _Bundle:
+    """A downloaded release, whether it is a zip or a tarball."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.tar = str(path).endswith((".tar.gz", ".tgz"))
+        if self.tar:
+            import tarfile
+            self._f = tarfile.open(path, "r:gz")
+        else:
+            self._f = zipfile.ZipFile(path)
+            bad = self._f.testzip()
+            if bad is not None:
+                self._f.close()
+                raise RuntimeError(f"the download is damaged ({bad})")
+
+    def names(self) -> list[str]:
+        return self._f.getnames() if self.tar else self._f.namelist()
+
+    def extract(self, where, members) -> None:
+        if self.tar:
+            wanted = set(members)
+            picked = [m for m in self._f.getmembers() if m.name in wanted]
+            # Nothing may climb out of the folder it is unpacked into.
+            for m in picked:
+                if m.islnk() or m.issym() or os.path.isabs(m.name) or ".." in Path(m.name).parts:
+                    raise RuntimeError(f"the download holds an unsafe path ({m.name})")
+            self._f.extractall(where, members=picked)
+        else:
+            self._f.extractall(where, members=members)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._f.close()
+
+
+def _open_release(path: Path) -> _Bundle:
+    return _Bundle(path)
+
+
 def _asset(release: dict) -> dict | None:
-    return next((a for a in release.get("assets", [])
-                 if ASSET_NAME.fullmatch(a.get("name", ""))), None)
+    """The file of this release meant for this system.
+
+    One without a system in its name is a release from before they were
+    built separately, and is for everybody.
+    """
+    want = _platform_tag()
+    mine, shared = None, None
+    for a in release.get("assets", []):
+        m = ASSET_NAME.fullmatch(a.get("name", ""))
+        if not m:
+            continue
+        if m.group("system") == want:
+            mine = a
+        elif m.group("system") is None:
+            shared = a
+    return mine or shared
 
 
 def _stage(release: dict, chosen: bool) -> None:
@@ -185,17 +252,14 @@ def _stage(release: dict, chosen: bool) -> None:
     if digest.startswith("sha256:") and digest.split(":", 1)[1] != h.hexdigest():
         partial.unlink(missing_ok=True)
         raise RuntimeError("the download does not match GitHub's fingerprint")
-    with zipfile.ZipFile(partial) as z:
-        bad = z.testzip()
-        if bad is not None:
-            raise RuntimeError(f"the download is damaged ({bad})")
-        if "KnoxMap/knoxmap.py" not in z.namelist():
+    with _open_release(partial) as bundle:
+        if "KnoxMap/knoxmap.py" not in bundle.names():
             raise RuntimeError("the download is not a KnoxMap release")
     partial.replace(target)
     STAGED.write_text(json.dumps({"version": version, "zip": str(target), "notes": notes,
                                   "sha256": h.hexdigest(), "chosen": chosen}),
                       encoding="utf-8")
-    for old in UPDATE_DIR.glob("KnoxMap-v*.zip"):
+    for old in UPDATE_DIR.glob("KnoxMap-v*"):
         if old != target:
             old.unlink(missing_ok=True)
     _log().info("update: KnoxMap %s is ready and applies on the next start", version)
@@ -320,8 +384,8 @@ def apply_staged() -> bool:
     watched = {name: _digest(BASE_DIR / name)
                for name in ("requirements.txt", "knoxmap_setup.py")}
     try:
-        with zipfile.ZipFile(zip_path) as z, tempfile.TemporaryDirectory(dir=UPDATE_DIR) as tmp:
-            members = [m for m in z.namelist() if m.startswith("KnoxMap/") and not m.endswith("/")]
+        with _open_release(zip_path) as z, tempfile.TemporaryDirectory(dir=UPDATE_DIR) as tmp:
+            members = [m for m in z.names() if m.startswith("KnoxMap/") and not m.endswith("/")]
             new_files = []
             for m in members:
                 rel = m[len("KnoxMap/"):]
@@ -331,12 +395,23 @@ def apply_staged() -> bool:
                 new_files.append(rel)
             # Unpack everything first, then move it into place: a failure while
             # unpacking leaves the working copy as it was.
-            z.extractall(tmp, members=[f"KnoxMap/{rel}" for rel in new_files])
+            z.extract(tmp, [f"KnoxMap/{rel}" for rel in new_files])
             for rel in new_files:
                 src = Path(tmp) / "KnoxMap" / rel
                 dest = BASE_DIR / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
+                mode = src.stat().st_mode
                 os.replace(src, dest)
+                # Keep the executable bit the tarball carried, and put one on
+                # the launchers whatever it said: a zip has no such bit, so
+                # after a Windows-built release ./knoxmap.sh would not run.
+                if os.name != "nt":
+                    if rel.endswith(".sh"):
+                        mode |= 0o111
+                    try:
+                        os.chmod(dest, mode & 0o7777)
+                    except OSError:
+                        pass
         # Files the old version had and the new one does not.
         try:
             old_files = json.loads(MANIFEST.read_text(encoding="utf-8")).get("files", [])

@@ -1,8 +1,13 @@
 name: release
 
-# Push a tag like v1.1 and this makes the GitHub release players download:
-# the same checks as every push, then a KnoxMap-v1.1.zip of the repository
-# with that version's CHANGELOG section as the notes.
+# Push a tag like v1.3.7 and this makes the GitHub release players download:
+# the same checks as every push, then one file per system with that version's
+# CHANGELOG section as the notes.
+#
+# Windows gets a zip, which Explorer opens without anything installed. Linux
+# and macOS get tarballs, because a zip has no executable bit and ./setup.sh
+# would not run out of one. Each carries only the launchers for its own
+# system, so nobody has to work out which of four files to double-click.
 on:
   push:
     tags: ["v*"]
@@ -19,9 +24,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Zip the app
+      - name: Pack one release per system
         run: |
-          git archive --format=zip --prefix=KnoxMap/ -o "KnoxMap-${GITHUB_REF_NAME}.zip" HEAD
+          set -eu
+          v="${GITHUB_REF_NAME}"
+          # git archive honours .gitattributes export-ignore and keeps the
+          # executable bit that setup.sh and knoxmap.sh carry in the index.
+          git archive --format=tar --prefix=KnoxMap/ -o base.tar HEAD
+          for system in windows linux macos; do
+            mkdir -p "pack/$system"
+            tar -C "pack/$system" -xf base.tar
+          done
+          rm -f pack/windows/KnoxMap/*.sh
+          rm -f pack/linux/KnoxMap/*.bat pack/macos/KnoxMap/*.bat
+          (cd pack/windows && zip -qr "$GITHUB_WORKSPACE/KnoxMap-$v-windows.zip" KnoxMap)
+          (cd pack/linux && tar -czf "$GITHUB_WORKSPACE/KnoxMap-$v-linux.tar.gz" KnoxMap)
+          (cd pack/macos && tar -czf "$GITHUB_WORKSPACE/KnoxMap-$v-macos.tar.gz" KnoxMap)
+          ls -l KnoxMap-$v-*
+          # The launchers must still be executable inside the tarballs.
+          tar -tvzf "KnoxMap-$v-linux.tar.gz" | grep -E 'KnoxMap/(setup|knoxmap)\.sh' |
+            grep -q 'rwxr-xr-x' || { echo "setup.sh is not executable in the tarball"; exit 1; }
 
       - name: Notes from CHANGELOG.md
         run: |
@@ -30,11 +52,20 @@ jobs:
             /^## / { on = (index($0, "## " v " ") == 1 || $0 == "## " v) ; next }
             on' CHANGELOG.md > notes.md
           if [ ! -s notes.md ]; then echo "See CHANGELOG.md." > notes.md; fi
-          printf '\n---\n**Install:** download `KnoxMap-%s.zip` below, unzip it and double-click `KnoxMap.bat`.\n' "$GITHUB_REF_NAME" >> notes.md
+          {
+            printf '\n---\n**Install**\n\n'
+            printf '| System | Download | Then |\n|---|---|---|\n'
+            printf '| Windows 10/11 | `KnoxMap-%s-windows.zip` | unzip it and double-click `KnoxMap.bat` |\n' "$GITHUB_REF_NAME"
+            printf '| Linux | `KnoxMap-%s-linux.tar.gz` | `tar -xzf` it, then `./setup.sh` and `./knoxmap.sh` |\n' "$GITHUB_REF_NAME"
+            printf '| macOS | `KnoxMap-%s-macos.tar.gz` | `tar -xzf` it, then `./setup.sh` and `./knoxmap.sh` |\n' "$GITHUB_REF_NAME"
+            printf '\nLinux and macOS need 64-bit Python 3.10+ of your own; see LINUX.md.\n'
+          } >> notes.md
 
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "KnoxMap-${GITHUB_REF_NAME}.zip" \
-            --title "KnoxMap ${GITHUB_REF_NAME#v}" --notes-file notes.md --latest
+          v="${GITHUB_REF_NAME}"
+          gh release create "$v" \
+            "KnoxMap-$v-windows.zip" "KnoxMap-$v-linux.tar.gz" "KnoxMap-$v-macos.tar.gz" \
+            --title "KnoxMap ${v#v}" --notes-file notes.md --latest
