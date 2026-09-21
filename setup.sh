@@ -45,11 +45,13 @@ echo "Installing Python packages..."
 .venv/bin/python -m pip install --disable-pip-version-check -q -r requirements.txt
 
 # Both of these are worth saying before the long download, not after it.
-if ! command -v wine >/dev/null 2>&1 && ! command -v wine64 >/dev/null 2>&1; then
+if [ "$(uname -s)-$(uname -m)" != "Linux-x86_64" ] &&
+   ! command -v wine >/dev/null 2>&1 && ! command -v wine64 >/dev/null 2>&1; then
   echo
-  echo "Note: wine was not found. Everything works except Compile, which runs"
-  echo "the map tools' Windows build. Install wine, or build the tools for"
-  echo "this system and put them in vendor/PZMappingTools/bin - see LINUX.md."
+  echo "Note: wine was not found. Everything works except Compile, which on"
+  echo "this system runs the map tools' Windows build. Install wine, or build"
+  echo "the tools for this system and put them in vendor/PZMappingTools/bin -"
+  echo "see LINUX.md. (On 64-bit Linux the compiler is fetched for you.)"
   echo
 fi
 

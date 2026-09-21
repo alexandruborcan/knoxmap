@@ -87,6 +87,7 @@ def _run_batch(cmd, should_stop, started: float):
 
     with scratch() as out_f, scratch() as err_f:
         proc = subprocess.Popen(cmd, stdout=out_f, stderr=err_f,
+                                env=knoxpaths.tool_env(),
                                 **({"start_new_session": True} if _OWN_GROUP else {}))
 
         def said() -> tuple[str, str]:
@@ -127,11 +128,12 @@ def world_size(pzw: Path) -> tuple[int, int]:
 
 
 def _tool_path(path: Path) -> str:
-    """A file as the map tools name it: forward slashes on Windows, a Wine
-    path off it."""
+    """A file as the map tools name it: forward slashes on Windows, and
+    otherwise what the compiler in use can open - its own name for a native
+    build, a Wine name for the Windows one."""
     if os.name == "nt":
         return path.as_posix()
-    return knoxpaths.wine_path(path)
+    return knoxpaths.tool_path(path)
 
 
 def assign_converted_maps(pzw: Path) -> int:
@@ -260,7 +262,7 @@ def compile_map(project_dir: str, batch: int = 4, exe: str | None = None,
         x1 = min(bx + batch - 1, w - 1)
         y1 = min(by + batch - 1, h - 1)
         cmd = knoxpaths.command_for(exe_path) + [
-            f"--generate-map={knoxpaths.wine_path(pzw)}",
+            f"--generate-map={knoxpaths.tool_path(pzw)}",
             f"--cells={bx},{by},{x1},{y1}"]
         batch_started = time.time()
         knoxstop.check(should_stop, "the compile")

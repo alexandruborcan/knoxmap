@@ -4,7 +4,9 @@ Everything KnoxMap does itself is Python, and runs anywhere Python does:
 downloading the area from OpenStreetMap, drawing the terrain, laying out and
 furnishing the buildings, writing the paper map and installing the mod. Only
 one step needs help, and that is **Compile**, which drives the PZ Mapping
-Tools — Windows programs, run here through Wine.
+Tools. On 64-bit Linux, Setup fetches a build of the map compiler made for
+this system, so that needs no help either; anywhere else it is a Windows
+program and runs through Wine.
 
 Download `KnoxMap-v…-linux.tar.gz` (or `…-macos.tar.gz`) from
 [Releases](https://github.com/spytheeuclidean-a11y/knoxmap/releases/latest),
@@ -50,18 +52,24 @@ For a real window, install one of the toolkits first and KnoxMap will use it:
 
 `KNOXMAP_BROWSER=1 ./knoxmap.sh` forces the browser on any system.
 
-## Compile, and Wine
+## Compile
 
-The map compiler (`PZWorldEd_cli.exe`) is a Windows program. KnoxMap runs it
-through Wine, which a PC that plays Project Zomboid through Proton already
-has in some form:
+On 64-bit Linux there is nothing to install. Setup downloads the map
+compiler built for this system — the same program from the same source as
+the Windows one, with the Qt it needs beside it — checks its fingerprint and
+puts it in `vendor/PZMappingTools/bin/`. No Wine, no Qt to install, and
+WorldEd's own log ends up in `logs/worlded/` where you can read it.
+
+On macOS, on a 32-bit or ARM machine, or if that download fails, the map
+compiler is the Windows one and KnoxMap runs it through Wine, which a PC
+that plays Project Zomboid through Proton already has in some form:
 
     sudo apt install wine       # or wine64, or your distribution's package
 
 `KNOXMAP_WINE=/path/to/wine ./knoxmap.sh` points KnoxMap at a particular
 build — a Proton runtime's, for instance.
 
-Without Wine every step except Compile works, and the window says so under
+With neither, every step except Compile works, and the window says so under
 **Setup isn't finished**. You can still finish a map by hand: use **Open in
 WorldEd** and run *BMP To TMX → All Cells* and *Generate Lots → All Cells*
 yourself, then **Install**.

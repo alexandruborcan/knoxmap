@@ -2,6 +2,23 @@
 
 ## 1.3.9
 
+- **Linux does not need Wine any more.** Setup now fetches a map compiler
+  built for Linux - the same program, from the same source at the same
+  commit, with the Qt it needs beside it - checks its fingerprint and puts it
+  in `vendor/PZMappingTools/bin/`. Nothing to install, no Wine, and the
+  compiler's own log lands in `logs/worlded/` where you can read it.
+
+  Upstream publishes Windows binaries only and calls its own Linux build flow
+  "intended" rather than tested, and it turned out not to compile: 20 copies
+  of `QPolygonF({a, b})`, which GCC will not accept because two points in
+  braces are as good a match for a rectangle's corners as for a list of
+  points. `worlded/patch_worlded_linux.py` names the container, and the build
+  is made and exercised on every push, with its source and licences published
+  beside it.
+
+  macOS, 32-bit and ARM still use the Windows build through Wine, and so does
+  Linux if that download ever fails.
+
 - **A compile that never ended on Linux.** WorldEd would die mid-compile and
   the window would carry on saying "compiling" for ever - nothing running,
   no error, and Stop did nothing either. KnoxMap was waiting for WorldEd's

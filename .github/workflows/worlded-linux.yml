@@ -224,6 +224,9 @@ jobs:
 
       - name: Tarball
         run: |
+          # Starting it above left its settings and a log behind. Nobody
+          # should be shipped a runner's config.
+          rm -rf pack/PZWorldEd_cli-linux-x86_64/settings                  pack/PZWorldEd_cli-linux-x86_64/README.txt
           cd pack
           tar czf PZWorldEd_cli-linux-x86_64.tar.gz PZWorldEd_cli-linux-x86_64
           sha256sum PZWorldEd_cli-linux-x86_64.tar.gz PZWorldEd_cli-linux-source.zip | tee SHA256
@@ -264,12 +267,15 @@ jobs:
           Built from PZ Mapping Tools at \`4e86b80c505b3d77a2fb5f5675b752da966306f6\`
           with KnoxMap's \`patch_worlded_cli.py\` and \`patch_worlded_linux.py\`,
           against Qt 5.15 on Ubuntu 22.04. The complete corresponding source is
-          inside the tarball under \`source/\`, with the licences.
+          the zip beside this, and the licences are inside the tarball.
 
           SHA-256 of the tarball: \`$sha\`
 
           Setup installs this for you; there is nothing to download by hand." \
-            PZWorldEd_cli-linux-x86_64.tar.gz ||
+            PZWorldEd_cli-linux-x86_64.tar.gz PZWorldEd_cli-linux-source.zip || true
+          # Whether the release was new or already there, make sure both are on
+          # it: the GPL wants the source from the same place as the binary.
           gh release upload "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" \
-            --clobber PZWorldEd_cli-linux-x86_64.tar.gz
+            --clobber PZWorldEd_cli-linux-x86_64.tar.gz \
+            PZWorldEd_cli-linux-source.zip
           echo "sha256=$sha"

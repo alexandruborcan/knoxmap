@@ -210,12 +210,14 @@ class Placement:
 
 
 def _tool_path(path: str) -> str:
-    """A folder as the map tools read it: forward slashes on Windows, and a
-    Wine path everywhere else (knoxpaths.wine_path)."""
+    """A folder as the map tools read it: forward slashes on Windows, and
+    otherwise whatever the compiler in use can open - the machine's own name
+    for a build made for it, a Wine name for the Windows one
+    (knoxpaths.tool_path)."""
     if os.name == "nt":
         return path.replace("\\", "/")
     import knoxpaths
-    return knoxpaths.wine_path(path)
+    return knoxpaths.tool_path(path)
 
 
 def render_pzw(cells_x: int, cells_y: int, bmp_name: str,

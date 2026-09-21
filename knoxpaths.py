@@ -80,14 +80,58 @@ def worlded_gui() -> Path | None:
 def command_for(program: Path | str) -> list[str]:
     """How to run one of the map tools here.
 
-    They are built for Windows. Off Windows the same binaries run under Wine,
-    which every Steam-on-Linux machine already has; a Linux build of the tools
-    (no .exe) is run directly. KNOXMAP_WINE names a different Wine.
+    A build for this system is run directly. The Windows build off Windows
+    goes through Wine, which every Steam-on-Linux machine already has;
+    KNOXMAP_WINE names a different one.
     """
     program = str(program)
     if os.name != "nt" and program.lower().endswith(".exe"):
         return [os.environ.get("KNOXMAP_WINE", "wine"), program]
     return [program]
+
+
+def through_wine(program: Path | str | None = None) -> bool:
+    """Whether running this tool means going through Wine.
+
+    `program` defaults to the compiler, which is what writes the maps and so
+    decides what the paths in a project have to look like.
+    """
+    if os.name == "nt":
+        return False
+    if program is None:
+        program = worlded_cli()
+    return bool(program) and str(program).lower().endswith(".exe")
+
+
+def tool_env(program: Path | str | None = None) -> dict[str, str]:
+    """The environment one of the map tools is run in.
+
+    A native build is a Qt program, and Qt will not start without a platform
+    plugin - not even to compile a map, which draws nothing on screen. The
+    offscreen one is bundled beside the binary; asking for it also keeps a
+    window from appearing part-way through a compile.
+    """
+    env = dict(os.environ)
+    if os.name == "nt":
+        return env          # the Windows build brings its own Qt platform
+    if program is None:
+        program = worlded_cli()
+    if not program or through_wine(program):
+        return env
+    plugins = Path(program).parent / "plugins" / "platforms"
+    if _is_dir(plugins):
+        env.setdefault("QT_QPA_PLATFORM_PLUGIN_PATH", str(plugins))
+    env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    return env
+
+
+def tool_path(path: Path | str) -> str:
+    """A path as the map tools will read it.
+
+    A build for this system reads the machine's own names. The Windows build
+    under Wine does not: "/home/you/maps/town" means nothing to it.
+    """
+    return wine_path(path) if through_wine() else str(path)
 
 
 def venv_python(windowless: bool = False) -> Path:

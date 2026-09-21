@@ -392,6 +392,41 @@ def check_portable(check) -> None:
     finally:
         del os.environ["KNOXMAP_WINE"]
 
+    # Which compiler is in use decides what the paths in a project have to
+    # look like. A build for this system reads the machine's own names; the
+    # Windows one under Wine cannot, and needs the Z: form.
+    check(not knoxpaths.through_wine("/tools/bin/PZWorldEd_cli"),
+          "a build for this system is not going through Wine")
+    check(knoxpaths.through_wine("/tools/bin/PZWorldEd_cli.exe") != windows,
+          "a .exe is, off Windows")
+    here = os.path.abspath(os.path.join(tempfile.gettempdir(), "knoxmap-paths"))
+    if knoxpaths.through_wine():
+        check(knoxpaths.tool_path(here).startswith(("Z:", "z:")) or ":" in knoxpaths.tool_path(here),
+              "compiling through Wine hands the tools a Wine path")
+    else:
+        check(knoxpaths.tool_path(here) == here,
+              "compiling with a native build hands the tools the real path")
+    # Qt will not start without a platform plugin, and a compile draws
+    # nothing, so a native build is asked for the offscreen one.
+    env = knoxpaths.tool_env("/tools/bin/PZWorldEd_cli")
+    check(windows or env.get("QT_QPA_PLATFORM") == "offscreen",
+          "a native build is run headless, so no window opens mid-compile")
+    check(knoxpaths.tool_env("/tools/bin/PZWorldEd_cli.exe").get("QT_QPA_PLATFORM")
+          == os.environ.get("QT_QPA_PLATFORM"),
+          "and the Windows build is left alone")
+
+    # Setup fetches the compiler built for this system on Linux rather than
+    # leaning on Wine, and checks what it downloaded.
+    import inspect
+
+    import knoxmap_setup
+    check(len(knoxmap_setup.CLI_LINUX_SHA256) == 64
+          and knoxmap_setup.CLI_LINUX_URL.endswith(".tar.gz"),
+          "the Linux compiler is pinned by fingerprint, not just by name")
+    source = inspect.getsource(knoxmap_setup.ensure_patched_cli)
+    check("_install_linux_cli" in source and "linux" in source,
+          "and Setup reaches for it before it reaches for Wine")
+
     # Setup puts the private Python in Scripts/ on Windows and bin/ elsewhere.
     python = str(knoxpaths.venv_python())
     wanted = "Scripts" if windows else "bin"

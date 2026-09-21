@@ -22,6 +22,7 @@ import contextlib
 import hashlib
 import io
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -45,6 +46,14 @@ REPO = "spytheeuclidean-a11y/knoxmap"
 CLI_URL = (f"https://github.com/{REPO}/releases/download/"
            "worlded-cli-20260909f/PZWorldEd_cli.exe")
 CLI_SHA256 = "dbae186f1f1f541decd123604ec9fc822d930f8f7c1ec8b17c1b89874628f3e2"
+
+# The same compiler built for Linux, from the same source at the same commit,
+# so that making a map there does not go through Wine at all. Upstream
+# publishes Windows binaries only, so this one is KnoxMap's: it carries its
+# own Qt and its complete source (.github/workflows/worlded-linux.yml).
+CLI_LINUX_URL = (f"https://github.com/{REPO}/releases/download/"
+                 "worlded-cli-linux-20260909f/PZWorldEd_cli-linux-x86_64.tar.gz")
+CLI_LINUX_SHA256 = "9ef88e23cb58e3fe3e1f9b5d901244b59203ec15d1a456f9f5e16d33164bf3af"
 
 USER_AGENT = f"KnoxMap-setup (+https://github.com/{REPO})"
 
@@ -116,12 +125,62 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _install_linux_cli(tools: Path) -> bool:
+    """The compiler built for Linux, unpacked into the tools' bin folder.
+
+    It brings its own Qt, so there is nothing to install and no Wine in the
+    way. It goes in bin/ beside where the Windows one would be because
+    WorldEd takes the folder above the binary as its installation root, and
+    that is where its configuration and the tile artwork live.
+    """
+    import tarfile
+
+    try:
+        data = download(CLI_LINUX_URL, "the compiler built for Linux (~29 MB)")
+    except Exception as exc:     # noqa: BLE001 - any failure means "use Wine"
+        say(f"      could not download it: {exc}")
+        return False
+    if hashlib.sha256(data).hexdigest() != CLI_LINUX_SHA256:
+        say("      the download does not match the expected fingerprint - not installed.")
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+            try:
+                tar.extractall(tmp, filter="data")
+            except TypeError:    # Python older than 3.12 has no filter
+                tar.extractall(tmp)
+        program = next((p for p in Path(tmp).rglob("PZWorldEd_cli") if p.is_file()), None)
+        if program is None:
+            say("      the archive has no PZWorldEd_cli - the layout may have changed.")
+            return False
+        bin_dir = tools / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        for item in program.parent.iterdir():
+            target = bin_dir / item.name
+            if item.is_dir():
+                if target.exists():
+                    shutil.rmtree(target)
+                shutil.copytree(item, target, symlinks=True)
+            else:
+                shutil.copy2(item, target)
+        (bin_dir / "PZWorldEd_cli").chmod(0o755)
+    say(f"      installed to {bin_dir / 'PZWorldEd_cli'} - no Wine needed")
+    return True
+
+
 def ensure_patched_cli(tools: Path) -> bool:
-    step(2, "Patched map compiler (PZWorldEd_cli.exe)")
+    step(2, "Patched map compiler (PZWorldEd_cli)")
     native = knoxpaths.worlded_cli()
     if native and not str(native).lower().endswith(".exe"):
         say(f"      found a build for this system at {native}")
         return True
+    # On Linux the compiler is fetched for this system rather than run
+    # through Wine. Anywhere else, and on any other processor, the Windows
+    # build is still the one there is.
+    if sys.platform.startswith("linux") and platform.machine() in ("x86_64", "AMD64"):
+        if _install_linux_cli(tools):
+            return True
+        say("      falling back to the Windows build, which needs Wine")
     exe = tools / "bin" / "PZWorldEd_cli.exe"
     if exe.exists():
         have = sha256(exe)

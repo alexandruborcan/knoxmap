@@ -1089,17 +1089,20 @@ def api_setup_status():
         {"id": "road_rules", "ok": _has_road_rules(tools), "label": "Kerbs and road markings",
          "fix": f"Run {setup} again to add them to the map tools."},
     ]
-    # The map tools are Windows programs. Off Windows they run under Wine,
-    # which a PC playing Project Zomboid through Proton already has - but not
-    # always on the path, and not at all on a machine with a native build of
-    # the game. Everything but Compile works without it.
+    # Off Windows the compiler is either one built for this system - what
+    # Setup fetches on Linux, and nothing else is needed for it - or the
+    # Windows build through Wine, which a PC playing Project Zomboid through
+    # Proton already has, though not always on the path. Everything but
+    # Compile works either way.
     if os.name != "nt":
         checks.append(
-            {"id": "wine", "ok": knoxpaths.tools_runnable(), "label": "Wine (to run the map tools)",
-             "fix": "The map tools are Windows programs. Install wine with your package "
-                    "manager (apt install wine, pacman -S wine, dnf install wine), or set "
-                    "KNOXMAP_WINE to the build you want used. Everything except Compile "
-                    "works without it."})
+            {"id": "wine", "ok": knoxpaths.tools_runnable(),
+             "label": "A map compiler that runs here",
+             "fix": f"Run {setup} again to fetch the compiler built for this system. "
+                    "If there is none for it, the map tools' Windows build needs Wine: "
+                    "install it with your package manager (apt install wine, pacman -S "
+                    "wine, dnf install wine), or set KNOXMAP_WINE to the build you want "
+                    "used. Everything except Compile works without either."})
     optional = [
         {"id": "elevators", "ok": knoxpaths.elevators_mod_installed(),
          "label": "Elevators mod (optional)",
