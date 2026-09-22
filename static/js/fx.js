@@ -156,7 +156,10 @@ const fx = (() => {
     const key = NOTE_STEP[id];
     if (!key) return;
     if (cls === 'ok') card(key, 'done');
-    else if (cls === 'bad') card(key, 'error');
+    // 'warn' is a step that finished and still needs attention - a compile
+    // that stepped over a batch of cells. It has stopped, so the card must
+    // not go on saying it is running.
+    else if (cls === 'bad' || cls === 'warn') card(key, 'error');
     else if (BUSY.test(text)) card(key, 'running');
     else if (/^ready/i.test(text)) card(key, 'ready');
   }

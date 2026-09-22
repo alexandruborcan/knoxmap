@@ -571,6 +571,485 @@ def check_portable(check) -> None:
             check(b"\r\n" not in path.read_bytes(), f"{name} has no carriage returns in it")
 
 
+def check_lots_apart(check, out: str, name: str = "selftest") -> None:
+    """No two buildings' lots cover the same square.
+
+    A lot reaches WorldEd as a rectangle - <lot x y width height> - and every
+    square of that rectangle is written into the cell's layers, so where two
+    lots overlap one building's wall is laid over the other's and a wall goes
+    missing. It went unnoticed because the tiles are checked and the
+    rectangles were not: a footprint off the grid owns a staircase of tiles
+    inside a rectangle half again as big, and the next building along took the
+    empty part quite legitimately. Brugge came out as 4202 buildings in 5004
+    overlapping pairs of lots, some of them a whole row deep.
+
+    Buildings that really do stand wall to wall - a terrace, a parade of shops
+    - share an edge and not a square: one lot ends on the column the next one
+    starts on, and the wall between them is the one both of them draw.
+    """
+    import csv as _csv
+    with open(os.path.join(out, f"{name}_placements.csv"), encoding="utf-8") as f:
+        lots = [(r["file"], int(r["tile_x"]), int(r["tile_y"]),
+                 int(r["width"]), int(r["height"])) for r in _csv.DictReader(f)]
+    # Only lots meeting in the same 64-tile square of the map can touch, which
+    # keeps this a few thousand comparisons on a real town instead of millions.
+    near: dict[tuple[int, int], list] = {}
+    for lot in lots:
+        _, x, y, w, h = lot
+        for gx in range(x // 64, (x + w - 1) // 64 + 1):
+            for gy in range(y // 64, (y + h - 1) // 64 + 1):
+                near.setdefault((gx, gy), []).append(lot)
+    clash = set()
+    for group in near.values():
+        for i, a in enumerate(group):
+            for b in group[i + 1:]:
+                if (min(a[1] + a[3], b[1] + b[3]) > max(a[1], b[1])
+                        and min(a[2] + a[4], b[2] + b[4]) > max(a[2], b[2])):
+                    clash.add(tuple(sorted((a[0], b[0]))))
+    worst = f", e.g. {' and '.join(sorted(clash)[0])}" if clash else ""
+    check(not clash, f"no two lots stand on the same square "
+                     f"({len(lots)} lots, {len(clash)} overlapping{worst})")
+
+
+def dense_town() -> list:
+    """A town as OpenStreetMap really draws one: terraces of seven-metre
+    houses shoulder to shoulder, and the places a player actually goes -
+    the police station, the school, the supermarket - traced at the size of
+    the building somebody surveyed, which is to say tiny."""
+    feats = []
+    for i in range(1, 8):
+        feats.append(way({"highway": "residential", "name": f"Street {i}"},
+                         [(i * 70, 40), (i * 70, 560)]))
+        feats.append(way({"highway": "residential", "name": f"Avenue {i}"},
+                         [(40, i * 70), (560, i * 70)]))
+    for bx in range(1, 7):
+        for by in range(1, 7):
+            x0, y0 = bx * 70 + 6, by * 70 + 6
+            for n in range(7):
+                x = x0 + n * 7.5
+                feats.append(way({"building": "house"}, box(x, y0, x + 7, y0 + 10)))
+    for tags, corner in (({"amenity": "police", "name": "Town Police"}, (90, 300, 102, 309)),
+                         ({"amenity": "fire_station", "name": "Fire Station"}, (120, 300, 133, 310)),
+                         ({"amenity": "school", "name": "High School"}, (300, 430, 320, 448)),
+                         ({"shop": "supermarket", "name": "Supermarket"}, (360, 300, 375, 312)),
+                         ({"amenity": "hospital", "name": "Hospital"}, (430, 430, 448, 446))):
+        feats.append(way({"building": "yes", **tags}, box(*corner)))
+    return feats
+
+
+def check_procedural(check, work: str) -> None:
+    """True map generation off: the same town, laid out for the game.
+
+    OSM's own density at 2 m a tile is a street of five-by-four boxes with
+    one room in each, which is what the setting exists to fix. Built with it
+    off, the same ground should carry fewer houses, each of them worth
+    walking into, and every named place should still be there - and be the
+    size the game gives that kind of building rather than the size the
+    surveyor traced.
+    """
+    from generator import renderer
+    from knoxbuild.build import build
+    from knoxbuild.settings import Settings
+    from knoxbuild.world import origin, set_origin
+
+    # Every build picks where its map stands in the world and leaves that
+    # choice in a module global, which the .pzw, the paper map and the zones
+    # are all written from. These maps are scratch, so the one the selftest
+    # is really checking has to be put back afterwards - without this the
+    # cell the project names is looked for under the wrong number and the
+    # whole install check fails somewhere else entirely.
+    was = origin()
+    try:
+        _dense(check, work, renderer, build, Settings)
+    finally:
+        set_origin(was)
+
+
+def _dense(check, work, renderer, build, Settings) -> None:
+    import csv as _csv
+
+    feats = dense_town()
+    got = {}
+    for name, true_map in (("true", 1), ("laid out", 0)):
+        out = os.path.join(work, f"dense-{true_map}")
+        renderer.render(feats, SOUTH, WEST, NORTH, EAST, meters_per_tile=2.0,
+                        output_dir=out, map_name="dense")
+        with contextlib.redirect_stdout(io.StringIO()):
+            build(out, settings=Settings(seed=1, true_map=true_map))
+        with open(os.path.join(out, "dense_placements.csv"), encoding="utf-8") as f:
+            got[true_map] = (list(_csv.DictReader(f)), out)
+
+    def houses(rows):
+        return [r for r in rows if r["kind"] == "house"]
+
+    def median_rooms(rows):
+        got_rooms = sorted(int(r["rooms"]) for r in rows)
+        return got_rooms[len(got_rooms) // 2] if got_rooms else 0
+
+    true_rows, _ = got[1]
+    laid_rows, laid_out = got[0]
+    n_true, n_laid = len(houses(true_rows)), len(houses(laid_rows))
+    check(0.25 <= n_laid / max(1, n_true) <= 0.75,
+          f"about half the houses are left out ({n_laid} of {n_true} kept)")
+    rooms_true, rooms_laid = median_rooms(houses(true_rows)), median_rooms(houses(laid_rows))
+    check(rooms_laid >= rooms_true + 2,
+          f"and the ones that stay are proper houses "
+          f"({rooms_true} rooms each as mapped, {rooms_laid} laid out for the game)")
+
+    # Every named place still there, and bigger than the footprint OSM had.
+    for kind in ("police", "fire", "school", "shop", "medical"):
+        was = [r for r in true_rows if r["kind"] == kind]
+        now = [r for r in laid_rows if r["kind"] == kind]
+        area = (lambda rows: max((int(r["width"]) * int(r["height"]) for r in rows),
+                                 default=0))
+        check(len(now) >= len(was) >= 1 and area(now) > area(was) * 2,
+              f"the {kind} is force-generated and built at the game's size "
+              f"({area(was)} tiles as mapped, {area(now)} laid out)")
+
+    # Growing a footprint must not grow it over the building next door.
+    check_lots_apart(check, laid_out, name="dense")
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        build(laid_out, settings=Settings(seed=1, true_map=0))
+    with open(os.path.join(laid_out, "dense_placements.csv"), encoding="utf-8") as f:
+        again = list(_csv.DictReader(f))
+    check([r["file"] for r in again] == [r["file"] for r in laid_rows],
+          "the same town comes out of the same seed")
+
+
+def check_rifle(check, out: str, mod_root: str) -> None:
+    """One military rifle on the map, wherever this town could put it.
+
+    The M16 spawns from army and police loot and almost nowhere else, so a
+    map of a town with neither has no container anywhere that could roll one.
+    knoxbuild/guns.py picks the best building the map has and the mod ships
+    the Lua that fills it.
+    """
+    import json as _json
+
+    cache = os.path.join(out, "selftest_guncache.json")
+    box_ = _json.load(open(cache, encoding="utf-8")) if os.path.exists(cache) else {}
+    from knoxbuild.world import CELL_SIZE, origin
+    ox = origin()[0] * CELL_SIZE
+    check(box_.get("kind") in ("military", "police", "gunshop", "house", "any")
+          and box_.get("x", 0) >= ox and box_.get("w", 0) > 0,
+          f"the rifle has somewhere to go ({box_.get('kind')}: "
+          f"{box_.get('name') or box_.get('building')}, at world {box_.get('x')},{box_.get('y')})")
+    check(box_.get("kind") == "military",
+          "and it goes to the army before anywhere else when the map has a base")
+
+    lua_dir = os.path.join(mod_root, "common", "media", "lua", "server", "KnoxMap")
+    shipped = sorted(os.listdir(lua_dir)) if os.path.isdir(lua_dir) else []
+    handler = os.path.join(lua_dir, "KnoxMapGunCache.lua")
+    text = open(handler, encoding="utf-8").read() if os.path.exists(handler) else ""
+    registrations = [f for f in shipped if f.startswith("KnoxMapGunCache_")]
+    registered = (open(os.path.join(lua_dir, registrations[0]), encoding="utf-8").read()
+                  if registrations else "")
+    ok = ("OnFillContainer" in text and "ModData.getOrCreate" in text
+          and "Base.AssaultRifle" in registered
+          and str(box_.get("x")) in registered
+          # Either file may load first, so both have to make the table.
+          and text.count("KnoxMapGunCache or") >= 1
+          and "KnoxMapGunCache or" in registered)
+    try:                      # a real parse when a Lua runtime is installed
+        import lupa
+        lupa.LuaRuntime().compile(text)
+        lupa.LuaRuntime().compile(registered)
+    except ImportError:
+        pass
+    except Exception as exc:  # noqa: BLE001 - a syntax error in the shipped Lua
+        ok = False
+        print(f"        {exc}")
+    check(ok, f"the rifle ships with the map ({len(shipped)} Lua files)")
+
+
+def check_qt_env(check) -> None:
+    """The map compiler is made to find its own Qt, and a Qt that got away
+    with it is explained rather than reported as a crash.
+
+    The build for Linux carries the Qt it was compiled against in lib/ beside
+    it, and records that folder as DT_RUNPATH - which the loader searches
+    *after* LD_LIBRARY_PATH. Steam and Proton both export that, so on a
+    machine with its own Qt 5 the compiler loaded the wrong one and Qt killed
+    it mid-compile: "Cannot mix incompatible Qt library (5.15.13) with this
+    library (5.15.3)", exit -6, reported from Linux Mint.
+    """
+    import knoxpaths
+
+    windows = os.name == "nt"
+    work = tempfile.mkdtemp(prefix="knoxmap-qt-")
+    binary = Path(work) / "bin" / "PZWorldEd_cli"
+    (binary.parent / "lib").mkdir(parents=True)
+    (binary.parent / "plugins" / "platforms").mkdir(parents=True)
+    binary.write_text("", encoding="utf-8")
+
+    was = os.environ.get("LD_LIBRARY_PATH")
+    os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu"
+    try:
+        env = knoxpaths.tool_env(binary)
+    finally:
+        if was is None:
+            os.environ.pop("LD_LIBRARY_PATH", None)
+        else:
+            os.environ["LD_LIBRARY_PATH"] = was
+    path = (env.get("LD_LIBRARY_PATH") or "").split(os.pathsep)
+    check(windows or (path and path[0] == str(binary.parent / "lib")),
+          "the compiler's own Qt goes ahead of the machine's on LD_LIBRARY_PATH")
+    check(windows or "/usr/lib/x86_64-linux-gnu" in path,
+          "and what was already there is kept, not thrown away")
+    check(windows or env.get("QT_QPA_PLATFORM_PLUGIN_PATH")
+          == str(binary.parent / "plugins" / "platforms"),
+          "and its own platform plugins are the ones it is pointed at")
+
+    # Only offscreen and minimal are bundled, so an inherited platform could
+    # only fail; a compile draws nothing whatever the desktop is.
+    was = os.environ.get("QT_QPA_PLATFORM")
+    os.environ["QT_QPA_PLATFORM"] = "wayland"
+    try:
+        forced = knoxpaths.tool_env(binary).get("QT_QPA_PLATFORM")
+    finally:
+        if was is None:
+            os.environ.pop("QT_QPA_PLATFORM", None)
+        else:
+            os.environ["QT_QPA_PLATFORM"] = was
+    check(windows or forced == "offscreen",
+          "a desktop's own QT_QPA_PLATFORM does not follow the compiler in")
+
+    real = ("QStandardPaths: XDG_RUNTIME_DIR not set\n"
+            "Cannot mix incompatible Qt library (5.15.13) with this library (5.15.3)\n")
+    said = knoxpaths.qt_trouble(real) or ""
+    check("5.15.13" in said and "5.15.3" in said and "LD_LIBRARY_PATH" in said,
+          "a Qt version clash is explained with both versions and what to do")
+    check(knoxpaths.qt_trouble(
+        "./PZWorldEd_cli: error while loading shared libraries: libQt5Core.so.5"),
+        "so is a library the loader could not find at all")
+    check(knoxpaths.qt_trouble("Generate Lots: batch 3 of 48, 12 cells") is None
+          and knoxpaths.qt_trouble("") is None,
+          "and an ordinary line is left alone - the check must not cry wolf")
+
+
+def check_compile_failures(check, work: str) -> None:
+    """A batch that fails is tried again, and then stepped over.
+
+    Reported from a 14-hour compile: batch 23 of 48 exited 1 after 849
+    seconds and the whole run was thrown away. Three attempts now, and what
+    still will not go is written down and skipped so the other 47 batches
+    are not lost with it - except for the failures that are about the machine
+    rather than the batch, which would fail all 48 the same way.
+    """
+    import json as _json
+
+    import knoxlog
+
+    from tools import compile_map as compiler
+
+    class Proc:
+        def __init__(self, rc, out=""):
+            self.returncode, self.stdout, self.stderr = rc, out, ""
+
+    keep = {name: getattr(compiler, name) for name in
+            ("_run_batch", "clear_stale", "assign_converted_maps", "world_size")}
+    keep_saved = knoxlog.save_tool_output
+    import knoxbuild.repair as _repair
+    keep_repair = _repair.repair_project
+
+    made = [0]
+
+    def harness(plan):
+        made[0] += 1
+        project = Path(work) / f"compile-{made[0]}"
+        (project / "lots").mkdir(parents=True)
+        (project / "tmx").mkdir()
+        (project / f"{project.name}.pzw").write_text("<world/>", encoding="utf-8")
+        exe = project / "PZWorldEd_cli"
+        exe.write_text("", encoding="utf-8")
+        tries: dict = {}
+
+        def fake(cmd, should_stop, started):
+            arg = [a for a in cmd if a.startswith("--cells=")][0]
+            bx, by, x1, y1 = (int(v) for v in arg[len("--cells="):].split(","))
+            n = tries.get((bx, by), 0)
+            tries[(bx, by)] = n + 1
+            codes = plan.get((bx, by), [0])
+            rc = codes[n] if n < len(codes) else codes[-1]
+            if rc == 0:
+                for cx in range(bx, x1 + 1):
+                    for cy in range(by, y1 + 1):
+                        (project / "lots" / f"{cx}_{cy}.lotheader").write_text("x")
+            return Proc(rc, "Cannot mix incompatible Qt library (5.15.13) with "
+                            "this library (5.15.3)" if rc == -6 else "")
+
+        compiler._run_batch = fake
+        return project, exe, tries
+
+    try:
+        compiler.clear_stale = lambda p: None
+        compiler.assign_converted_maps = lambda p: None
+        compiler.world_size = lambda p: (4, 4)
+        _repair.repair_project = lambda p: {"changed": False, "moved": 0, "dropped": []}
+        knoxlog.save_tool_output = lambda *a, **k: Path("batch.log")
+
+        # One bad batch out of four, good on the second attempt.
+        project, exe, tries = harness({(2, 0): [1, 0]})
+        cells = compiler.compile_map(str(project), batch=2, exe=str(exe))
+        check(cells == 16 and tries[(2, 0)] == 2 and not compiler.failed_cells(project),
+              f"a batch that fails once is tried again and the map is whole ({cells} cells)")
+
+        # One that never works first time round: the other three batches still
+        # compile, and it comes good when it is asked for again on its own.
+        project, exe, tries = harness({(2, 0): [1, 1, 1, 0]})
+        cells = compiler.compile_map(str(project), batch=2, exe=str(exe))
+        failed = compiler.failed_cells(project)
+        check(cells == 12 and tries[(2, 0)] == compiler.BATCH_ATTEMPTS
+              and [f["cells"] for f in failed] == [[2, 0, 3, 1]],
+              f"one that never works is stepped over, not thrown away ({cells} cells, "
+              f"{len(failed)} recorded)")
+        check(not (project / compiler.LOCK_FILE).exists(),
+              "and the compile lock is let go afterwards")
+
+        # ...and asking for just those cells again compiles them.
+        again = compiler.compile_map(str(project), batch=2, exe=str(exe),
+                                     only_cells=[f["cells"] for f in failed])
+        check(again == 16 and not compiler.failed_cells(project),
+              f"compiling only the failed cells finishes the map ({again} cells)")
+
+        # A Qt that cannot start is not this batch's fault: 48 batches of it
+        # is hours of the same abort, so it stops on the first.
+        project, exe, tries = harness({(0, 0): [-6]})
+        try:
+            compiler.compile_map(str(project), batch=2, exe=str(exe))
+            said = ""
+        except RuntimeError as exc:
+            said = str(exc)
+        check(sum(tries.values()) == 1 and "5.15.13" in said,
+              "a compiler that cannot start stops the run at once, with what is wrong")
+
+        # Two at a time in one folder write the same lots and the same .pzw.
+        project, exe, _tries = harness({})
+        (project / compiler.LOCK_FILE).write_text(
+            _json.dumps({"pid": os.getpid() + 1, "run": "other"}), encoding="utf-8")
+        alive = compiler._pid_alive
+        compiler._pid_alive = lambda pid: True
+        try:
+            compiler.compile_map(str(project), batch=2, exe=str(exe))
+            refused = ""
+        except RuntimeError as exc:
+            refused = str(exc)
+        finally:
+            compiler._pid_alive = alive
+        check("already being compiled" in refused,
+              "a second compile of the same map is refused while one is running")
+
+        # ...but a lock left by a compile that crashed is not forever.
+        (project / compiler.LOCK_FILE).write_text(
+            _json.dumps({"pid": 999999, "run": "crashed"}), encoding="utf-8")
+        cells = compiler.compile_map(str(project), batch=2, exe=str(exe))
+        check(cells == 16, "and a lock left behind by a crash is cleared, not fatal")
+    finally:
+        for name, value in keep.items():
+            setattr(compiler, name, value)
+        knoxlog.save_tool_output = keep_saved
+        _repair.repair_project = keep_repair
+
+
+def check_wall_corners(check) -> None:
+    """No window, and no outside door, on a tile that carries two walls.
+
+    BuildingEd draws a tile with both a west and a north wall as one corner
+    piece. Put a window there and it becomes a window facing one way, and the
+    other half of the corner is simply not drawn - a window with a hole beside
+    it, hanging on nothing. Reported on a generated town as windows all along
+    a wall with gaps you could see straight through.
+
+    layout.py always blocked this, but it asked _facade_runs, which only knows
+    the outside of the building - so the corner where a *room* wall reaches
+    the facade went unblocked, and that is almost all of them. Counted over
+    the two city maps in output/ at the time: 7,684 windows on such corners
+    across 5,311 buildings, 37% of the buildings affected.
+    """
+    from knoxbuild.layout import _room_edges, build_building
+    from knoxbuild.settings import Settings
+
+    def walls_of(grid):
+        h, w = len(grid), len(grid[0])
+
+        def inside(x, y):
+            return 0 <= x < w and 0 <= y < h and bool(grid[y][x])
+
+        edges = set()
+        for y in range(h):
+            for x in range(w):
+                if not inside(x, y):
+                    continue
+                # An east wall is the west edge of the tile past it, and a
+                # south wall the north edge of the row below: that is how
+                # BuildingEd names them.
+                for there, edge in (((x - 1, y), (x, y, "W")),
+                                    ((x, y - 1), (x, y, "N")),
+                                    ((x + 1, y), (x + 1, y, "W")),
+                                    ((x, y + 1), (x, y + 1, "N"))):
+                    if not inside(*there):
+                        edges.add(edge)
+        return edges
+
+    def stepped(w, h, step):
+        """A footprint with a stepped diagonal side, as a turned building has
+        - which is where every one of these corners comes from."""
+        return [[x >= int(y / step) for x in range(w)] for y in range(h)]
+
+    windows = doors = bad_windows = bad_doors = stuck = 0
+    # A counter, not hash(): Python randomises string hashes per process, and
+    # a check that builds different buildings every run cannot be compared
+    # with the last one.
+    seed = 0
+    for kind in (None, "shop", "civic", "apartment", "school", "medical", "industrial"):
+        for step in (1.0, 1.5, 2.0, 3.0):
+            for levels in (1, 2, 3):
+                seed += 1
+                plan = build_building(26, 20, levels=levels, kind=kind,
+                                      mask=stepped(26, 20, step), settings=Settings(),
+                                      seed=seed, commercial=kind is not None)
+                for storey in plan.storeys:
+                    outside = walls_of(storey.grid)
+                    every = outside | _room_edges(storey.grid)
+                    corner = {(x, y) for x, y, d in every
+                              if (x, y, "N" if d == "W" else "W") in every}
+                    windows += len(storey.windows)
+                    doors += len(storey.doors)
+                    bad_windows += sum(1 for x, y, _d in storey.windows if (x, y) in corner)
+                    for x, y, d in storey.doors:
+                        if (x, y) not in corner:
+                            continue
+                        # A door has nowhere else to go when every tile of the
+                        # boundary it stands in is a corner too. Leaving it is
+                        # right: a broken corner beats a room nobody can enter.
+                        pair = _sides_for(storey.grid, x, y, d)
+                        elsewhere = [e for e in every
+                                     if _sides_for(storey.grid, *e) == pair
+                                     and (e[0], e[1]) not in corner]
+                        if elsewhere:
+                            bad_doors += 1
+                        else:
+                            stuck += 1
+
+    check(bad_windows == 0,
+          f"no window lands on a corner that carries two walls "
+          f"({windows} windows over {7 * 4 * 3} stepped buildings, {bad_windows} bad)")
+    check(bad_doors == 0,
+          f"and a door on one moves along its own boundary ({doors} doors, "
+          f"{bad_doors} that could have moved and did not, {stuck} with nowhere to go)")
+
+
+def _sides_for(grid, x, y, d):
+    """The room ids either side of a wall edge; 0 is outside."""
+    h, w = len(grid), len(grid[0])
+
+    def at(px, py):
+        return grid[py][px] if 0 <= px < w and 0 <= py < h else 0
+
+    return (at(x - 1, y), at(x, y)) if d == "W" else (at(x, y - 1), at(x, y))
+
+
 def check_repair(check, out: str) -> None:
     """A project broken at its edges, as older versions and hand edits leave
     them, is repaired before compiling instead of stopping it."""
@@ -924,6 +1403,11 @@ def main(argv: list[str]) -> int:
         cells = [(int(a), int(b)) for a, b in re.findall(r'<cell x="(\d+)" y="(\d+)"', pzw_text)]
         check(size and all(x < int(size.group(1)) and y < int(size.group(2)) for x, y in cells),
               "every cell in the WorldEd project is inside the world")
+        check_lots_apart(check, out)
+        check_procedural(check, work)
+        check_qt_env(check)
+        check_compile_failures(check, work)
+        check_wall_corners(check)
         check_repair(check, out)
         from knoxbuild.world import Placement, Zone, render_pzw
         edge = render_pzw(2, 2, "m.bmp", [Placement("a.tbx", 10, 599, 3, 3),
@@ -1316,6 +1800,7 @@ def main(argv: list[str]) -> int:
             ok = False
             print(f"        {exc}")
         check(ok, "the Reset loot menu is installed with the map")
+        check_rifle(check, out, mod_root)
     except Exception:
         import traceback
         traceback.print_exc()

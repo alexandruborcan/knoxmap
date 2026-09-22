@@ -92,6 +92,9 @@ input[readonly] { background: var(--bg); color: var(--muted); }
 .btn-primary:hover:not(:disabled) { background: #b7ea80; }
 .btn-primary:disabled { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--faint); }
 .btn-small { padding: 3px 8px; font-size: 13px; }
+/* .btn sets display, which beats the browser's own rule for [hidden] -
+   so every hidden button was shown anyway, Stop included. */
+.btn[hidden] { display: none; }
 .linkish {
   background: none; border: 0; padding: 0; margin-top: 8px; color: var(--accent);
   font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline;
@@ -274,6 +277,8 @@ input[readonly] { background: var(--bg); color: var(--muted); }
 .step-note { display: block; color: var(--muted); font-size: 13px; }
 .step-note.ok { color: var(--accent); }
 .step-note.bad { color: var(--bad); }
+/* Finished, but not whole: a compile that stepped over a batch. */
+.step-note.warn { color: var(--warn); }
 .manual-fallback { margin-top: 6px; font-size: 13px; }
 .manual-fallback summary { cursor: pointer; color: var(--muted); }
 .manual-fallback .btn { margin: 6px 0; }

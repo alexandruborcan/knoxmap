@@ -322,6 +322,8 @@ const SETTING_LABELS = {
   spawn_density:       ['Horde cap', 'Most zombies one 10×10 m spot can hold. Vanilla towns peak at 10.'],
   tree_density:        ['Woodland', 'Scales tree cover. Trees are cover to hide in.'],
   seed:                ['Seed', 'Same seed and area gives the same town again.'],
+  true_map:            ['True map generation', '1 builds every address as mapped. 0 keeps the real roads, rivers, woods and terrain, but leaves out half the houses and grows the rest into proper homes with yards. Named places are always built, at the game’s size.'],
+  guaranteed_rifle:    ['Guaranteed rifle', '1 leaves one military rifle on the map: in an army building if there is one, else the police station, else a gun shop, else a house on the edge of town. A real town has no checkpoints for one to spawn in.'],
   min_size:            ['Smallest building', 'Buildings narrower than this many tiles are left out.'],
   align_streets:       ['Straighten streets', '1 turns the map so the main street grid runs along the tiles - no staircase roads. 0 keeps north up.'],
   rotate_degrees:      ['Turn the map', 'Degrees to turn the whole area before it is built, on top of Straighten streets. Use it when the automatic angle picks the wrong grid.'],
@@ -1154,10 +1156,21 @@ function setupPipeline(data) {
   fx.resetFrom('buildings');
   document.getElementById('compileBar').style.width = '0%';
   note('buildingsNote', 'Turns every OSM footprint into a furnished building.');
+  // Reset with the rest of them: opening another map used to leave whatever
+  // the last compile said sitting under the new one's Compile button.
+  note('compileNote', "Turns the map into the game's files with WorldEd. "
+                      + 'Takes a few minutes.');
   note('worldedNote', 'Generate the buildings first.');
   note('installNote', 'Copies the compiled map into ~/Zomboid/mods.');
   renderCensus(null);
+  document.getElementById('retryCellsBtn').hidden = true;
   checkLots();
+  // Whatever the last compile of this map left behind, said again now: the
+  // window has been closed and reopened since, and "done" would be a lie.
+  fetch(`/api/compile-status?map=${encodeURIComponent(data.mapName)}`)
+    .then(r => r.json())
+    .then(p => { if (p.state !== 'running') showFailedCells(p.failed, p.cells); })
+    .catch(() => { /* nothing to add if it cannot be asked */ });
 }
 
 document.getElementById('buildingsBtn').addEventListener('click', async () => {
@@ -1325,15 +1338,20 @@ document.getElementById('recountBtn').addEventListener('click', async () => {
 // rebuilt PZWorldEd_cli.exe adds a --generate-map switch that runs both, so
 // this step needs no clicking; the manual route stays available underneath.
 
-document.getElementById('compileBtn').addEventListener('click', async () => {
+// A batch WorldEd could not do is tried three times and then stepped over, so
+// a compile can finish with a hole in it rather than throwing away the hours
+// already spent. `onlyFailed` asks for just those cells back.
+async function startCompile(onlyFailed) {
   const btn = document.getElementById('compileBtn');
+  const retry = document.getElementById('retryCellsBtn');
   btn.disabled = true;
+  retry.hidden = true;
   note('compileNote', 'Starting…');
   showStop(currentMap);
   try {
     const res = await fetch('/api/compile', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mapName: currentMap }),
+      body: JSON.stringify({ mapName: currentMap, onlyFailed: !!onlyFailed }),
     });
     const data = await res.json();
     if (!res.ok) throw apiError(data, res);
@@ -1343,7 +1361,31 @@ document.getElementById('compileBtn').addEventListener('click', async () => {
     showStop(null);
     btn.disabled = false;
   }
-});
+}
+
+document.getElementById('compileBtn')
+  .addEventListener('click', () => startCompile(false));
+document.getElementById('retryCellsBtn')
+  .addEventListener('click', () => startCompile(true));
+
+// A compile that stepped over a batch is finished but not whole: installing it
+// gives a map with a hole where those cells should be. Say so wherever that is
+// noticed - at the end of a compile, and again when the map is opened later,
+// because by then nobody remembers which one it was.
+function showFailedCells(failed, cells) {
+  const retry = document.getElementById('retryCellsBtn');
+  failed = failed || [];
+  retry.hidden = !failed.length;
+  if (!failed.length) return false;
+  const where = failed.map(f => `${f.cells[0]},${f.cells[1]}`).join('  ');
+  const many = failed.length === 1 ? 'batch' : 'batches';
+  note('compileNote',
+       `${cells} cells compiled, but ${failed.length} ${many} would not compile `
+       + `after 3 tries (at ${where}). The map has a hole in it until those are done.`,
+       'warn');
+  note('installNote', 'You can install it, but those cells will be missing.');
+  return true;
+}
 
 // The compile runs on the server's own thread; this just watches it. Blocking
 // the request instead froze the whole window for the length of a town.
@@ -1389,8 +1431,9 @@ function pollCompile() {
       }
       if (p.state === 'done') {
         fx.progress('compile', 100);
-        note('compileNote', `${p.cells} cells compiled.`, 'ok');
         document.getElementById('installBtn').disabled = false;
+        if (showFailedCells(p.failed, p.cells)) return;
+        note('compileNote', `${p.cells} cells compiled.`, 'ok');
         note('installNote', 'Ready to install.');
       }
     } catch (_) { /* keep watching */ }

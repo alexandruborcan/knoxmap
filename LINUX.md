@@ -69,6 +69,26 @@ that plays Project Zomboid through Proton already has in some form:
 `KNOXMAP_WINE=/path/to/wine ./knoxmap.sh` points KnoxMap at a particular
 build — a Proton runtime's, for instance.
 
+### If the compiler will not start
+
+The build for Linux carries its own Qt, and it has to be the one that loads.
+The binary records that folder as DT_RUNPATH, which the loader searches after
+`LD_LIBRARY_PATH` - so KnoxMap puts it on the front of `LD_LIBRARY_PATH`
+itself before running the compiler. Without that, a machine with its own Qt 5
+on it compiled against 5.15.3 and loaded 5.15.13, and Qt aborted the run:
+
+    Cannot mix incompatible Qt library (5.15.13) with this library (5.15.3)
+
+Setup runs the compiler once after installing it and says so if it will not
+start. If it still happens, something is putting a Qt ahead of the bundled
+one: start KnoxMap from a plain terminal rather than from Steam, or clear
+`LD_LIBRARY_PATH` for it. `KNOXMAP_QT_PLATFORM` overrides the platform
+plugin, which is `offscreen` because a compile draws nothing.
+
+This system also has to be Ubuntu 22.04's vintage or newer - the build
+leaves the C library and libstdc++ to the machine. On anything older,
+install wine and KnoxMap will use the Windows build instead.
+
 With neither, every step except Compile works, and the window says so under
 **Setup isn't finished**. You can still finish a map by hand: use **Open in
 WorldEd** and run *BMP To TMX → All Cells* and *Generate Lots → All Cells*

@@ -53,6 +53,21 @@ class Settings:
 
     # --- buildings -------------------------------------------------------
     seed: int = 1
+    # Rebuild every address the map has (1), or read the map for what is
+    # there and lay the housing out to suit the game (0).
+    #
+    # OpenStreetMap draws a town at its real density. At 2 m a tile that is a
+    # street of five-by-four-tile houses standing shoulder to shoulder, which
+    # is accurate and is not a place anyone wants to loot: a Knox County house
+    # is four or five proper rooms with a yard round it. With this off, about
+    # half the ordinary houses are left out and the ones that stay grow into
+    # the gap. Roads, rivers, woods and the terrain are still exactly as
+    # mapped - only the housing is the game's rather than the survey's.
+    true_map: int = 1
+    # Put one military rifle somewhere on the map, come what may. A real town
+    # has no army checkpoint in it, so the game's rifles - which spawn from
+    # army and police loot - may have nowhere at all to appear.
+    guaranteed_rifle: int = 1
     min_size: int = 3            # skip footprints narrower than this, in tiles
     # and larger than this. It was 60, which threw away the largest
     # buildings in town - the factory, the cultural centre - which are
@@ -114,6 +129,8 @@ LIMITS = {
     "m2_per_person": (10.0, 150.0),
     "tree_density": (0.0, 3.0),
     "seed": (0, 2 ** 31 - 1),
+    "true_map": (0, 1),
+    "guaranteed_rifle": (0, 1),
     # MIN_ROOM in layout.py is 3, and a building has to hold at least one room
     # plus its walls. MAX_BUILDING_DIMENSION in the reader is 300.
     "min_size": (3, 40),

@@ -168,17 +168,36 @@ def _install_linux_cli(tools: Path) -> bool:
     return True
 
 
+def _say_if_it_will_not_start() -> None:
+    """Check the compiler starts, and say what is wrong if it does not.
+
+    A compiler that cannot load its Qt does not fail politely: Qt aborts
+    inside its own start-up and the compile dies with exit -6 on the first
+    batch of cells, with two version numbers and nothing to act on. Whoever
+    hits that has already drawn a map and waited through a build, and the
+    answer has nothing to do with the map. Better to find it here, in the
+    seconds after the compiler is installed, and say it in words.
+    """
+    trouble = knoxpaths.compiler_trouble()
+    if trouble:
+        say("")
+        say(f"      WARNING: {trouble}.")
+        say("      Compile will fail until that is sorted; everything else works.")
+
+
 def ensure_patched_cli(tools: Path) -> bool:
     step(2, "Patched map compiler (PZWorldEd_cli)")
     native = knoxpaths.worlded_cli()
     if native and not str(native).lower().endswith(".exe"):
         say(f"      found a build for this system at {native}")
+        _say_if_it_will_not_start()
         return True
     # On Linux the compiler is fetched for this system rather than run
     # through Wine. Anywhere else, and on any other processor, the Windows
     # build is still the one there is.
     if sys.platform.startswith("linux") and platform.machine() in ("x86_64", "AMD64"):
         if _install_linux_cli(tools):
+            _say_if_it_will_not_start()
             return True
         say("      falling back to the Windows build, which needs Wine")
     exe = tools / "bin" / "PZWorldEd_cli.exe"

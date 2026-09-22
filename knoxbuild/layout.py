@@ -1409,6 +1409,79 @@ def _facade_runs(grid: list[list[int]]) -> list[tuple[str, list[tuple[int, int, 
     return runs
 
 
+def _room_edges(grid: list[list[int]]) -> set[tuple[int, int, str]]:
+    """The walls BuildingEd draws between one room and the next.
+
+    _facade_runs only knows about the outside of the building. These are just
+    as real to the renderer: where a room wall meets the facade on the same
+    tile, that tile carries both a west and a north wall and is drawn as one
+    corner piece.
+    """
+    h, w = len(grid), len(grid[0])
+    out: set[tuple[int, int, str]] = set()
+    for y in range(h):
+        for x in range(w):
+            here = grid[y][x]
+            if not here:
+                continue
+            if x > 0 and grid[y][x - 1] and grid[y][x - 1] != here:
+                out.add((x, y, "W"))
+            if y > 0 and grid[y - 1][x] and grid[y - 1][x] != here:
+                out.add((x, y, "N"))
+    return out
+
+
+def _sides_of(grid: list[list[int]], x: int, y: int, d: str) -> tuple[int, int]:
+    """The room ids either side of a wall edge; 0 is outside."""
+    h, w = len(grid), len(grid[0])
+
+    def at(px, py):
+        return grid[py][px] if 0 <= px < w and 0 <= py < h else 0
+
+    return (at(x - 1, y), at(x, y)) if d == "W" else (at(x, y - 1), at(x, y))
+
+
+def _doors_off_corners(storey, edges: set, corners: set) -> int:
+    """Slide a door off an inside corner, where there is somewhere to slide to.
+
+    A door has the same trouble a window does - BuildingEd draws a tile
+    carrying both a west and a north wall as one corner piece, and a door
+    replaces it with a door facing one way, losing the other half. A door
+    cannot simply be dropped, though: the room behind it may have no other
+    way in. So it moves along its own wall to the nearest tile that is not a
+    corner and has the same two rooms either side of it, and if there is no
+    such tile it stays where it is - a door in a broken corner still beats a
+    room nobody can enter.
+    """
+    taken = set(storey.doors)
+    keep_off = set(storey.party) | set(getattr(storey, "wall_pieces", ()))
+    # Every wall that is not a corner, by the pair of rooms it stands between.
+    # Sliding along the door's own wall is not enough: a stepped diagonal side
+    # is a wall one or two tiles long, so there is nowhere on it to slide to.
+    # A door only has to separate the same two spaces, and the rest of that
+    # boundary will do.
+    boundary: dict[tuple[int, int], list] = {}
+    for (ex, ey, ed) in edges:
+        if (ex, ey) in corners or (ex, ey, ed) in keep_off:
+            continue
+        boundary.setdefault(_sides_of(storey.grid, ex, ey, ed), []).append((ex, ey, ed))
+    moved = 0
+    for i, (x, y, d) in enumerate(storey.doors):
+        if (x, y) not in corners:
+            continue
+        want = _sides_of(storey.grid, x, y, d)
+        spots = [s for s in boundary.get(want, ()) if s not in taken]
+        if not spots:
+            continue
+        # The nearest one, so a front door stays on the front of the house.
+        spot = min(spots, key=lambda s: (abs(s[0] - x) + abs(s[1] - y), s))
+        taken.discard((x, y, d))
+        taken.add(spot)
+        storey.doors[i] = spot
+        moved += 1
+    return moved
+
+
 def _front_side(building: "Building", kind: str | None) -> set[str]:
     """Which walls count as the front, and get the closer window spacing.
 
@@ -1528,10 +1601,23 @@ def _place_windows(building: "Building", kind: str | None,
         # inside corner of every step down a diagonal side. BuildingEd draws
         # that corner as one piece; a window there replaced it with a window
         # facing one way, and the other half of the wall was left out.
+        #
+        # A room wall counts as much as the facade does. This used to ask
+        # _facade_runs alone, which only knows the outside of the building, so
+        # the corner where a room's wall meets the facade was not blocked -
+        # and that is most of them. Counted on a city map: 290 windows over
+        # 60 buildings hanging in a gap, every one of them where an inside
+        # wall arrives at the outside one on the same tile.
         edges = {(x, y, d) for _side, wall in _facade_runs(storey.grid)
-                 for x, y, d, _ix, _iy in wall}
-        blocked |= {(x, y, d) for x, y, d in edges
-                    if (x, y, "N" if d == "W" else "W") in edges}
+                 for x, y, d, _ix, _iy in wall} | _room_edges(storey.grid)
+        on_corner = {(x, y) for x, y, d in edges
+                     if (x, y, "N" if d == "W" else "W") in edges}
+        blocked |= {(x, y, d) for x, y, d in edges if (x, y) in on_corner}
+        # Doors land on those corners too, and break them the same way. They
+        # move along their wall rather than being dropped, so nothing is shut
+        # in - and it happens before the windows are placed, which keep clear
+        # of wherever the doors end up.
+        _doors_off_corners(storey, edges, on_corner)
         # Shuttered windows need the tile either side for their shutters: a
         # window two tiles from a door or another window had its shutters
         # jammed against the frame or overlapping the next one's.

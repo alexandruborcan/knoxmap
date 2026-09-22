@@ -14,6 +14,8 @@ folder, because each batch only generates the cells it was given.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import json
 import os
 import re
 import signal
@@ -21,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -223,9 +226,153 @@ def clear_stale(project: Path) -> None:
             pzw.write_text(unassigned, encoding="utf-8")
 
 
+# A batch that fails is tried again before the compile gives up on it. Most
+# of what goes wrong in WorldEd's lot export goes wrong once - a texture read
+# that returned short, a file still held open - and the second run of the same
+# cells comes out clean. Three attempts, because a fourth has never helped.
+#
+# Nothing is deleted between attempts. The patched CLI skips a batch only when
+# every one of its cells already has a .lotheader, so a batch that died
+# part-way still has cells pending and is redone; and the lot files are named
+# in 256-tile cells against the world origin, not the 300-tile cells a batch
+# is given, so working out which files belong to a batch is a good way to
+# delete somebody else's finished work.
+BATCH_ATTEMPTS = 3
+
+# What a compile leaves behind about the cells it could not do, for the
+# window to offer and for a later run to pick up.
+FAILURES_FILE = "compile_failures.json"
+
+# One compile of a project at a time. The window already refuses a second
+# while one is running, but the command line does not know about the window,
+# and two compiles of one project write the same lots folder and the same
+# .pzw: assign_converted_maps rewrites it after every batch.
+LOCK_FILE = ".compiling"
+
+
+def _pid_alive(pid: int) -> bool:
+    """Whether a process is still running.
+
+    Only used to tell a compile that is still going from a lock left behind
+    by one that crashed, so "cannot tell" counts as alive: refusing to start
+    is recoverable and two compiles in one folder are not.
+    """
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        QUERY_LIMITED_INFORMATION, STILL_ACTIVE = 0x1000, 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False          # gone, or never ours to look at
+        try:
+            code = ctypes.c_ulong()
+            if kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return code.value == STILL_ACTIVE
+            return True
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True               # somebody else's, but running
+    except OSError:
+        return True
+    return True
+
+
+@contextlib.contextmanager
+def _only_one(project: Path, run: str):
+    """Hold this project's compile lock for the length of a run."""
+    path = project / LOCK_FILE
+    try:
+        held = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        held = None
+    if isinstance(held, dict):
+        pid = int(held.get("pid") or 0)
+        if pid != os.getpid() and _pid_alive(pid):
+            raise RuntimeError(
+                f"{project.name} is already being compiled (run {held.get('run')}, "
+                f"process {pid}). Wait for that to finish, or stop it, rather than "
+                f"running two - they write the same files.")
+        knoxlog.log.warning("compile %s [%s]: cleared a lock left by run %s (process "
+                            "%s is gone)", project.name, run, held.get("run"), pid)
+    try:
+        path.write_text(json.dumps({"pid": os.getpid(), "run": run,
+                                    "started": time.time()}), encoding="utf-8")
+    except OSError:
+        pass                      # a lock that cannot be written is not a reason to stop
+    try:
+        yield
+    finally:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def failed_cells(project_dir: str | Path) -> list[dict]:
+    """The batches the last compile of this project could not do.
+
+    Each is {"cells": [x0, y0, x1, y1], "exit": int, "why": str, "log": str}.
+    Empty when the last compile did the lot, which is the usual answer.
+    """
+    try:
+        with open(Path(project_dir) / FAILURES_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    found = data.get("failed") if isinstance(data, dict) else None
+    return [f for f in found if isinstance(f, dict)] if isinstance(found, list) else []
+
+
+def _record_failures(project: Path, run: str, batch: int, failures: list[dict]) -> None:
+    path = project / FAILURES_FILE
+    if not failures:
+        try:
+            path.unlink()         # a clean run leaves nothing behind
+        except OSError:
+            pass
+        return
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"run": run, "when": time.strftime("%Y-%m-%d %H:%M:%S"),
+                       "batch": batch, "failed": failures}, f, indent=2)
+    except OSError:
+        knoxlog.log.warning("compile %s [%s]: could not write %s",
+                            project.name, run, FAILURES_FILE)
+
+
+def _why(proc) -> str:
+    """The lines of a batch's output that say what went wrong, rather than
+    the last three, which after a crash are thread shutdown chatter."""
+    lines = (proc.stderr or proc.stdout or "").strip().splitlines()
+    said = [ln for ln in lines
+            if re.search(r"CRITICAL|ERROR|FATAL|Could not|failed", ln)]
+    return " | ".join((said or lines)[-3:])
+
+
 def compile_map(project_dir: str, batch: int = 4, exe: str | None = None,
-                on_progress=None, should_stop=None) -> int:
-    """Run every batch. Returns the number of compiled cells."""
+                on_progress=None, should_stop=None,
+                only_cells: list | None = None) -> int:
+    """Run every batch. Returns the number of compiled cells.
+
+    A batch that fails is tried again (BATCH_ATTEMPTS) and, if it still will
+    not go, written down and stepped over: half a day's compiling should not
+    be thrown away because batch 23 of 48 hit a bad texture read. What could
+    not be done ends up in compile_failures.json and is offered again, and
+    `only_cells` - a list of [x0, y0, x1, y1] - compiles just those.
+
+    Some failures are not worth a second attempt because they are about this
+    machine rather than this batch: a Qt that cannot start fails every batch
+    in exactly the same way, and forty-eight batches of it is hours of
+    nothing. Those stop the run at once, with what to do about it.
+    """
     project = Path(project_dir).resolve()
     pzw = project / f"{project.name}.pzw"
     if not pzw.exists():
@@ -234,69 +381,124 @@ def compile_map(project_dir: str, batch: int = 4, exe: str | None = None,
     if not exe_path.exists():
         raise FileNotFoundError(f"PZWorldEd_cli not found at {exe_path}")
 
-    clear_stale(project)
-    # Whatever wrote the project, one entry past the edge of the map must not
-    # stop the whole compile: WorldEd refuses a project over a single one.
-    from knoxbuild.repair import repair_project
-    try:
-        fixed = repair_project(pzw)
-    except Exception:  # noqa: BLE001 - a repair that fails leaves the project as it was
-        knoxlog.log.exception("compile %s: checking the project failed", project.name)
-    else:
-        if fixed["changed"]:
-            knoxlog.log.warning("compile %s: repaired the project before compiling - moved %d, "
-                                "dropped %d%s", project.name, fixed["moved"], len(fixed["dropped"]),
-                                "".join(f"\n  dropped {what}: {why}"
-                                        for what, why in fixed["dropped"][:50]))
-    lots = project / "lots"
-    lots.mkdir(exist_ok=True)
-    (project / "tmx").mkdir(exist_ok=True)
+    # Every line of this run's log carries it, so two runs in one log file can
+    # be told apart - which is the first question to ask of any compile that
+    # looks like it did its batches out of order.
+    run = uuid.uuid4().hex[:8]
 
-    w, h = world_size(pzw)
-    if not w or not h:
-        raise ValueError(f"Could not read the world size from {pzw.name}")
-
-    batches = [(x, y) for y in range(0, h, batch) for x in range(0, w, batch)]
-    started = time.time()
-    for i, (bx, by) in enumerate(batches, start=1):
-        x1 = min(bx + batch - 1, w - 1)
-        y1 = min(by + batch - 1, h - 1)
-        cmd = knoxpaths.command_for(exe_path) + [
-            f"--generate-map={knoxpaths.tool_path(pzw)}",
-            f"--cells={bx},{by},{x1},{y1}"]
-        batch_started = time.time()
-        knoxstop.check(should_stop, "the compile")
-        proc = _run_batch(cmd, should_stop, batch_started)
-        # WorldEd's own account of the batch, kept whatever happened: when it
-        # crashes this is the only record of how far it got.
-        saved = knoxlog.save_tool_output("PZWorldEd_cli", project.name,
-                                         f"cells_{bx}_{by}-{x1}_{y1}", proc.returncode,
-                                         proc.stdout, proc.stderr)
-        knoxlog.log.info("compile %s: batch %d/%d cells %d,%d..%d,%d exit %d (%s) in %.0fs",
-                         project.name, i, len(batches), bx, by, x1, y1, proc.returncode,
-                         knoxlog.explain_exit(proc.returncode), time.time() - batch_started)
-        assign_converted_maps(pzw)
-        cells = len(list(lots.glob("*.lotheader")))
-        if on_progress:
-            on_progress(i, len(batches), cells)
+    with _only_one(project, run):
+        clear_stale(project)
+        # Whatever wrote the project, one entry past the edge of the map must not
+        # stop the whole compile: WorldEd refuses a project over a single one.
+        from knoxbuild.repair import repair_project
+        try:
+            fixed = repair_project(pzw)
+        except Exception:  # noqa: BLE001 - a repair that fails leaves the project as it was
+            knoxlog.log.exception("compile %s: checking the project failed", project.name)
         else:
-            elapsed = time.time() - started
-            print(f"  batch {i}/{len(batches)} cells {bx},{by}..{x1},{y1} "
-                  f"-> {cells} compiled  ({elapsed:.0f}s)", flush=True)
-        # 65 used to be tolerated because the wait for WorldEd was a guess.
-        # It now waits for the lot manager's own completion, so 65 means a
-        # genuine stall or timeout and the batch's cells cannot be trusted.
-        if proc.returncode != 0:
-            lines = (proc.stderr or proc.stdout or "").strip().splitlines()
-            # The lines that say what went wrong, rather than the last three,
-            # which after a crash are usually thread shutdown chatter.
-            said = [ln for ln in lines if re.search(r"CRITICAL|ERROR|FATAL|Could not|failed", ln)]
-            tail = (said or lines)[-3:]
-            where = f" - WorldEd's output is in logs/worlded/{saved.name}" if saved else ""
-            raise RuntimeError(f"WorldEd {knoxlog.explain_exit(proc.returncode)} on cells "
-                               f"{bx},{by}..{x1},{y1} (exit {proc.returncode}): "
-                               f"{' | '.join(tail)}{where}")
-    return len(list(lots.glob("*.lotheader")))
+            if fixed["changed"]:
+                knoxlog.log.warning("compile %s: repaired the project before compiling - moved %d, "
+                                    "dropped %d%s", project.name, fixed["moved"],
+                                    len(fixed["dropped"]),
+                                    "".join(f"\n  dropped {what}: {why}"
+                                            for what, why in fixed["dropped"][:50]))
+        lots = project / "lots"
+        lots.mkdir(exist_ok=True)
+        (project / "tmx").mkdir(exist_ok=True)
+
+        w, h = world_size(pzw)
+        if not w or not h:
+            raise ValueError(f"Could not read the world size from {pzw.name}")
+
+        if only_cells:
+            batches = [tuple(int(v) for v in cells[:4]) for cells in only_cells]
+        else:
+            batches = [(x, y, min(x + batch - 1, w - 1), min(y + batch - 1, h - 1))
+                       for y in range(0, h, batch) for x in range(0, w, batch)]
+        started = time.time()
+        failures: list[dict] = []
+        # Batches are done one at a time, in this order, and the counter says
+        # so: this has always been a plain loop, but a compile that looked
+        # like it jumped from 25 to 18 is worth being able to rule out.
+        previous = 0
+        for i, (bx, by, x1, y1) in enumerate(batches, start=1):
+            if i != previous + 1:
+                raise RuntimeError(f"compile {project.name}: batch {i} followed {previous} "
+                                   f"- the batches are not being done in order")
+            previous = i
+            cmd = knoxpaths.command_for(exe_path) + [
+                f"--generate-map={knoxpaths.tool_path(pzw)}",
+                f"--cells={bx},{by},{x1},{y1}"]
+            for attempt in range(1, BATCH_ATTEMPTS + 1):
+                knoxstop.check(should_stop, "the compile")
+                attempt_started = time.time()
+                proc = _run_batch(cmd, should_stop, attempt_started)
+                # WorldEd's own account of the batch, kept whatever happened: when it
+                # crashes this is the only record of how far it got.
+                saved = knoxlog.save_tool_output("PZWorldEd_cli", project.name,
+                                                 f"cells_{bx}_{by}-{x1}_{y1}", proc.returncode,
+                                                 proc.stdout, proc.stderr)
+                again = f" (attempt {attempt}/{BATCH_ATTEMPTS})" if attempt > 1 else ""
+                knoxlog.log.info("compile %s [%s]: batch %d/%d cells %d,%d..%d,%d exit %d "
+                                 "(%s) in %.0fs%s", project.name, run, i, len(batches),
+                                 bx, by, x1, y1, proc.returncode,
+                                 knoxlog.explain_exit(proc.returncode),
+                                 time.time() - attempt_started, again)
+                if proc.returncode == 0:
+                    break
+                # Not this batch's fault, and every other batch would go the
+                # same way: stop now and say what to do about it.
+                trouble = knoxpaths.qt_trouble((proc.stderr or "") + (proc.stdout or ""))
+                if trouble:
+                    raise RuntimeError(f"Compile cannot run on this system: {trouble}.")
+                if attempt < BATCH_ATTEMPTS:
+                    knoxlog.log.warning("compile %s [%s]: batch %d/%d failed, trying again",
+                                        project.name, run, i, len(batches))
+            assign_converted_maps(pzw)
+            cells = len(list(lots.glob("*.lotheader")))
+            # 65 used to be tolerated because the wait for WorldEd was a guess.
+            # It now waits for the lot manager's own completion, so 65 means a
+            # genuine stall or timeout and the batch's cells cannot be trusted.
+            if proc.returncode != 0:
+                where = f"logs/worlded/{saved.name}" if saved else ""
+                failures.append({"cells": [bx, by, x1, y1], "exit": proc.returncode,
+                                 "why": _why(proc), "log": where,
+                                 "attempts": BATCH_ATTEMPTS})
+                knoxlog.log.error("compile %s [%s]: giving up on batch %d/%d cells "
+                                  "%d,%d..%d,%d after %d attempts - carrying on with the "
+                                  "rest", project.name, run, i, len(batches),
+                                  bx, by, x1, y1, BATCH_ATTEMPTS)
+            if on_progress:
+                on_progress(i, len(batches), cells)
+            else:
+                elapsed = time.time() - started
+                state = "FAILED" if proc.returncode != 0 else f"-> {cells} compiled"
+                print(f"  batch {i}/{len(batches)} cells {bx},{by}..{x1},{y1} "
+                      f"{state}  ({elapsed:.0f}s)", flush=True)
+
+        # Asked for particular cells, the batches that were not in this run
+        # keep whatever the last full compile said about them - retrying two
+        # of five failures must not lose the other three.
+        this_run = list(failures)
+        if only_cells:
+            done = {tuple(b) for b in batches}
+            failures = [f for f in failed_cells(project)
+                        if tuple(f.get("cells") or ()) not in done] + failures
+        _record_failures(project, run, batch, failures)
+        if this_run and len(this_run) >= len(batches):
+            first = this_run[0]
+            where = f" - WorldEd's output is in {first['log']}" if first.get("log") else ""
+            at = (f"{first['cells'][0]},{first['cells'][1]}.."
+                  f"{first['cells'][2]},{first['cells'][3]}")
+            if only_cells:
+                raise RuntimeError(f"Those cells still will not compile. {at} "
+                                   f"(exit {first['exit']}): {first['why']}{where}")
+            raise RuntimeError(f"WorldEd failed on every batch. The first was cells "
+                               f"{at} (exit {first['exit']}): {first['why']}{where}")
+        if failures:
+            knoxlog.log.warning("compile %s [%s]: finished with %d of %d batches failed",
+                                project.name, run, len(failures), len(batches))
+        return len(list(lots.glob("*.lotheader")))
 
 
 def main(argv: list[str] | None = None) -> int:

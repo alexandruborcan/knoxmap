@@ -829,6 +829,11 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     # Real outlines of the buildings placed, for the in-game paper map.
     outlines: list[tuple[list[tuple[float, float]], str, str]] = []
     occupied = np.zeros((proj.height, proj.width), dtype=bool)
+    # ...and the ground covered by a lot rectangle rather than by a building's
+    # own tiles, which is more ground whenever the footprint is not a rectangle
+    # (footprint._clear_box). Lots may not overlap: WorldEd writes each of them
+    # into the same cell layers, so where two cover a square only one survives.
+    lots = np.zeros((proj.height, proj.width), dtype=bool)
     # Knox County roads: every building upright, and stood clear of the roads.
     straight = bool(settings.straight_roads or info.get("straight_roads"))
     road_weight = _road_weight(out_dir, map_name, proj) if straight else None
@@ -840,6 +845,7 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     jobs: list[tuple] = []       # what each building needs to lay itself out
     street_side = _street_finder(out_dir, map_name)
     stations: list[tuple] = []   # petrol stations, for their pumps
+    gunshops: set[str] = set()   # and the buildings OSM says sell weapons
     canopies: list[list] = []    # and the canopies over their forecourts
     decided: list[tuple] = []    # and what the map needs to know about it
     surroundings: list[tuple[float, float, float, int | None]] = []
@@ -864,6 +870,43 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
             surroundings.append((centre.x, centre.y, poly.area,
                                  levels_from_tags(tags, settings)))
     order.sort()
+    # A town laid out for the game rather than copied from the survey: about
+    # half the ordinary houses left out and what stays grown to a size worth
+    # walking into, landmarks kept whatever and placed first so the ground a
+    # police station needs is still free (knoxbuild/procedural.py). With
+    # true_map on, nothing here runs and the order is the one it always was.
+    thinning: dict = {}
+    if not settings.true_map:
+        from .procedural import HOUSING, Candidate, plan
+        cands = []
+        m2_per_tile = info["meters_per_tile"] ** 2
+        for _neg_area, i, px in order:
+            tags = geo["features"][i].get("properties", {})
+            kind = classify_building(tags)
+            if kind is None:
+                # What the land around it says, as the placement loop asks
+                # below. Without this the huts on an army base and the wings
+                # of a hospital look like untagged houses here and are
+                # thinned away, and the base loses the building the whole
+                # map's rifles were going to spawn in. Sheds are left out of
+                # it for the same reason the loop leaves them out: a garage
+                # on an industrial estate is a garage, not a works.
+                btag = (tags.get("building") or "").strip().lower()
+                if (-_neg_area * m2_per_tile > SHED_MAX_M2
+                        and btag not in SHED_VALUES):
+                    centre = Polygon(px).centroid
+                    if not centre.is_empty:
+                        kind = areas.kind_for(centre.x, centre.y, int(-_neg_area))
+            notable = is_notable(tags, kind)
+            # Only housing can be thinned, so only housing has to be checked
+            # for the shop or surgery mapped inside it; anything else is a
+            # landmark already. A throwaway `taken` set, because the real one
+            # is filled below, as each building claims its points for good.
+            has_use = (not notable and kind in HOUSING
+                       and bool(_points_inside(points, px, set())))
+            cands.append(Candidate(i, px, -_neg_area, kind, notable, has_use))
+        kept, thinning = plan(cands, max_size)
+        order = [(-c.area, c.index, c.px) for c in kept]
     metres_per_tile = info["meters_per_tile"]
     context = Context(proj.width, proj.height, surroundings, metres_per_tile)
 
@@ -875,7 +918,7 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
         feat = geo["features"][i]
         fp, reason = place(px, occupied, min_side=min_size, max_side=max_size,
                            snap_degrees=45 if straight else settings.square_buildings,
-                           avoid=road_weight)
+                           avoid=road_weight, lots=lots)
         if fp is None:
             skipped[reason] += 1
             continue
@@ -980,6 +1023,8 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
                 f"{map_name}_{i:04d}_{n:02d}.tbx"
             label = (f"{name} {n + 1}" if name and len(units) > 1 else
                      name or f"{map_name} building {i}")
+            if ("gunstore", "storage") in unit_uses:
+                gunshops.add(fname)
             jobs.append((uw, uh, levels, commercial, seed + i * 31 + n, special, umask,
                          settings, style, label, os.path.join(bdir, fname),
                          street_side(ux0, uy0, uw, uh),
@@ -1037,6 +1082,18 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
         })
     rows.sort(key=lambda r: r["file"])
     knoxstop.check(should_stop, "the buildings")
+
+    # One military rifle somewhere on the map, whatever this town turned out
+    # to be: an army building, else the police station, else a gun shop, else
+    # a house on the edge of town (knoxbuild/guns.py). A real place has no
+    # checkpoints in it, so without this the game's rifles have nowhere at all
+    # they could spawn.
+    from . import guns
+    from .world import CELL_SIZE
+    gun_cache = guns.write(
+        out_dir, map_name,
+        guns.choose(rows, gunshops) if settings.guaranteed_rifle else None,
+        origin(), CELL_SIZE)
     from .yards import paint_paths
     drives: list = []
     paths, yard_fences = paint_paths(out_dir, map_name, rows, occupied, drives)
@@ -1121,6 +1178,10 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     print(f"  kind from land use  : {from_area}")
     print(f"  sheds and garages   : {sheds}")
     print(f"  rows cut into units : {rows_split} rows -> {units_made} buildings")
+    if thinning:
+        print(f"  town laid out for PZ: {thinning['thinned']} houses left out, "
+              f"{thinning['grown']} buildings grown, "
+              f"{thinning['landmarks']} landmarks kept and placed first")
     print(f"  storeys from nearby : {from_near}")
     storeys = _c.Counter(r["levels"] for r in rows)
     print(f"  storeys             : {dict(sorted(storeys.items()))}")
@@ -1129,6 +1190,9 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
           f"rest inferred from footprint")
     print(f"  rooms               : {total_rooms}")
     print(f"  furniture pieces    : {total_furn}")
+    if gun_cache:
+        print(f"guaranteed rifle      : {gun_cache['kind']} - "
+              f"{gun_cache['name'] or gun_cache['building']}")
     print(f"world origin          : cell {origin()[0]},{origin()[1]}")
     print(f"wrote {pzw_path}")
     print(f"wrote {csv_path}")

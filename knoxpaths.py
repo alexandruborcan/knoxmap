@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import sys
 from pathlib import Path
 
@@ -106,10 +107,26 @@ def through_wine(program: Path | str | None = None) -> bool:
 def tool_env(program: Path | str | None = None) -> dict[str, str]:
     """The environment one of the map tools is run in.
 
-    A native build is a Qt program, and Qt will not start without a platform
-    plugin - not even to compile a map, which draws nothing on screen. The
-    offscreen one is bundled beside the binary; asking for it also keeps a
-    window from appearing part-way through a compile.
+    A native build is a Qt program, and it has to find *its own* Qt. The
+    build for Linux travels with the exact Qt it was compiled against, in
+    `lib/` beside the binary, and the binary records that folder - but as
+    DT_RUNPATH, which the loader searches *after* LD_LIBRARY_PATH. Steam and
+    Proton both export LD_LIBRARY_PATH, and a distribution with its own Qt 5
+    on it then wins: the program was built against 5.15.3, loaded 5.15.13,
+    and Qt killed it on the spot with
+
+        Cannot mix incompatible Qt library (5.15.13) with this library
+        (5.15.3)
+
+    which is exit -6 in the middle of a compile and no map. So the bundled
+    folder goes on the front of LD_LIBRARY_PATH, ahead of anything the
+    machine already had there.
+
+    Qt also will not start without a platform plugin - not even to compile a
+    map, which draws nothing on screen. Only the offscreen and minimal
+    plugins are bundled, so an inherited QT_QPA_PLATFORM naming any other
+    (wayland, xcb) could only fail; the compile is headless whatever the
+    desktop is. KNOXMAP_QT_PLATFORM overrides it for anyone who needs to.
     """
     env = dict(os.environ)
     if os.name == "nt":
@@ -118,11 +135,95 @@ def tool_env(program: Path | str | None = None) -> dict[str, str]:
         program = worlded_cli()
     if not program or through_wine(program):
         return env
-    plugins = Path(program).parent / "plugins" / "platforms"
-    if _is_dir(plugins):
-        env.setdefault("QT_QPA_PLATFORM_PLUGIN_PATH", str(plugins))
-    env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    beside = Path(program).parent
+    libs = beside / "lib"
+    if _is_dir(libs):
+        already = env.get("LD_LIBRARY_PATH") or ""
+        env["LD_LIBRARY_PATH"] = (f"{libs}{os.pathsep}{already}" if already
+                                  else str(libs))
+    plugins = beside / "plugins"
+    if _is_dir(plugins / "platforms"):
+        env["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(plugins / "platforms")
+        env["QT_PLUGIN_PATH"] = str(plugins)
+    env["QT_QPA_PLATFORM"] = os.environ.get("KNOXMAP_QT_PLATFORM", "offscreen")
     return env
+
+
+# Qt's own words when a program built against one Qt loads another. It is a
+# hard abort inside Qt's start-up, before any of WorldEd's code runs, so it
+# looks like a crash rather than a configuration problem.
+QT_MISMATCH = re.compile(
+    r"Cannot mix incompatible Qt library \(([\d.]+)\) with this library \(([\d.]+)\)")
+# The loader could not find a library at all, or Qt could not find a plugin.
+LOADER_TROUBLE = re.compile(
+    r"error while loading shared libraries|"
+    r"no Qt platform plugin could be initialized|"
+    r"symbol lookup error|version `[A-Z_]+[\d.]+' not found")
+
+
+def qt_trouble(output: str) -> str | None:
+    """A plain explanation of a Qt or loader failure in a tool's output.
+
+    Returned for the message the window shows, because the raw one names two
+    version numbers and nothing a person can act on.
+    """
+    if not output:
+        return None
+    found = QT_MISMATCH.search(output)
+    if found:
+        loaded, built = found.group(1), found.group(2)
+        return (f"the map compiler loaded Qt {loaded} from this system instead of "
+                f"the Qt {built} it ships with. Something on LD_LIBRARY_PATH is "
+                f"ahead of it - Steam and Proton both set that. Start KnoxMap from "
+                f"a plain terminal, or run it with LD_LIBRARY_PATH= emptied")
+    if LOADER_TROUBLE.search(output):
+        return ("the map compiler could not load the libraries it needs. If this "
+                "system is older than Ubuntu 22.04 the build for Linux will not "
+                "run on it; install wine and KnoxMap will use the Windows build "
+                "instead (see LINUX.md)")
+    return None
+
+
+def compiler_trouble(timeout: float = 20.0) -> str | None:
+    """Whether the map compiler can start on this system at all, in words.
+
+    Runs it once against a project that is not there. What is being checked
+    is only that the binary loads and Qt starts; anything past that is
+    WorldEd's own complaint about the missing file, which is a pass. A Qt
+    that cannot start aborts inside Qt's own start-up, before WorldEd runs a
+    line, so it shows up in the first second or two - and if the program is
+    still going when the time is up, it got past the part this is about.
+
+    Returns None when there is nothing to say, which includes every case it
+    does not recognise: a check that cries wolf about an unfamiliar warning
+    is worse than no check.
+    """
+    import subprocess
+
+    program = worlded_cli()
+    if not program or os.name == "nt" or through_wine(program):
+        return None          # the Windows build brings its own Qt
+    missing = Path(program).parent / "knoxmap-no-such-project.pzw"
+    try:
+        proc = subprocess.Popen(
+            command_for(program) + [f"--generate-map={tool_path(missing)}"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            errors="replace", env=tool_env(program),
+            start_new_session=True)
+    except OSError as exc:
+        return f"the map compiler at {program} would not start: {exc}"
+    try:
+        output, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # Still running, so Qt is up and this is WorldEd waiting on something
+        # of its own. End it and everything it started.
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (OSError, AttributeError):
+            proc.kill()
+        proc.communicate(timeout=10)
+        return None
+    return qt_trouble(output)
 
 
 def tool_path(path: Path | str) -> str:

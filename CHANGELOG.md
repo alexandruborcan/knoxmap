@@ -1,5 +1,146 @@
 # Changelog
 
+## 1.3.9.2
+
+- **Floating windows, and walls with holes beside them.** Reported on a
+  generated town: windows all along a wall, each one hanging in a gap you
+  could see straight through.
+
+  BuildingEd draws a tile that carries both a west and a north wall as *one*
+  corner piece. Put a window on that tile and it becomes a window facing one
+  way, and the other half of the corner is not drawn at all. KnoxMap has
+  always known this and blocked it - but it asked `_facade_runs`, which only
+  knows the outside of the building, so the corner where a *room's* wall
+  arrives at the facade on the same tile was never blocked. That is almost
+  all of them. Counted over the two city maps sitting in `output/`: **7,684
+  windows on such corners across 5,311 buildings**, 37% of every building
+  affected. Not one of them was the case the old guard covered.
+
+  Room walls now count as walls. On the same buildings rebuilt, 241 bad
+  windows became 0, for five per cent fewer windows overall.
+
+  Doors land on those corners too and break them the same way, and a door
+  cannot simply be dropped - the room behind it may have no other way in. A
+  door on a corner now moves to the nearest tile of the same boundary: the
+  same two rooms either side, so nothing is shut in. Sliding along its own
+  wall was not enough, because a stepped diagonal side is a wall one or two
+  tiles long with nowhere to slide to; it looks at the whole boundary
+  instead. Where every tile of that boundary is a corner too, the door stays
+  where it is, because a broken corner beats a room nobody can enter.
+
+  This is why it showed up on a town and not on Knox County: the corners come
+  from stepped diagonal walls, and a building only steps its walls when it is
+  turned more than *Square up buildings* degrees from the grid - which is
+  most of them on a real map of a real place.
+
+- **Compile failed on Linux with a Qt no-one asked for.** Reported from Linux
+  Mint: every compile died on the first batch of cells with
+
+      WorldEd failed on cells 0,0..3,3 (exit -6): Cannot mix incompatible
+      Qt library (5.15.13) with this library (5.15.3)
+
+  The compiler built for Linux carries the exact Qt it was built against in
+  `lib/` beside it, and the binary records that folder - but as DT_RUNPATH,
+  which the loader searches *after* `LD_LIBRARY_PATH`. Steam and Proton both
+  export that, so on a machine with its own Qt 5 installed the system's won,
+  the program found a Qt it was not built against, and Qt killed it on the
+  spot. Nothing to do with Python, the virtual environment or Wine: none of
+  them are in a compile on 64-bit Linux.
+
+  The bundled folder now goes on the *front* of `LD_LIBRARY_PATH`, ahead of
+  whatever was already there, and the compile is held to the offscreen
+  platform plugin rather than inheriting a desktop's `QT_QPA_PLATFORM` -
+  only offscreen and minimal are shipped, so anything else could only fail.
+
+  Setup also runs the compiler once now, straight after installing it, and
+  says in words if it will not start. Finding that out in the seconds after
+  setup beats finding it out after drawing a map and waiting through a
+  build, and a compile that hits it anyway now explains itself instead of
+  printing two version numbers.
+
+- **One bad batch no longer throws away the whole compile.** Reported from a
+  fourteen-hour run: batch 23 of 48 exited 1 after 849 seconds, and with it
+  went the other 47. A batch is now tried three times - most of what goes
+  wrong in WorldEd's lot export goes wrong once - and if it still will not go
+  it is written down and stepped over so the rest of the town still compiles.
+
+  What could not be done is named in the window, with **Compile the cells
+  that failed** beside it to run just those rather than walking the whole map
+  again. The step says the map has a hole in it until they are done, and says
+  it again next time the map is opened, because by then nobody remembers
+  which one it was. Nothing is deleted to retry: the compiler already redoes
+  a batch that has cells missing.
+
+  Failures that are about the machine rather than the batch still stop
+  everything at once - a Qt that cannot start would fail all forty-eight the
+  same way, and three attempts each is hours of the same abort.
+
+- **Two compiles of one map can no longer run at once.** Reported as batches
+  appearing out of order in the log. The batch loop has always been a plain
+  sequential one, and it now proves it: every run carries an id on every log
+  line so two runs in one log file can be told apart, the batch counter is
+  checked against the one before it, and a project holds a lock for the
+  length of a compile. Starting a second - from the window and the command
+  line, say - is refused with what is already running rather than letting
+  both write the same lots folder and the same `.pzw`. A lock left behind by
+  a compile that crashed is cleared by the next one.
+
+- **Hidden buttons were not hidden.** `.btn` sets `display`, which beats the
+  browser's own rule for `[hidden]`, so every button meant to be out of the
+  way was on screen anyway - Stop, most visibly, offered on a step that was
+  not running. Also: opening a map left whatever the last compile had said
+  sitting under the new one's Compile button.
+
+- **True map generation, and what to do when you do not want it.** A new
+  setting under *Fine tuning*. Left on - as it is by default - nothing
+  changes: every address OpenStreetMap has is built where it is, at the size
+  it really is.
+
+  Turned off, the roads, rivers, woodland and terrain are still exactly as
+  mapped, and only the housing changes. OSM draws a town at its real density,
+  which at 2 m a tile is a street of five-by-four-tile houses standing
+  shoulder to shoulder: accurate, and a row of one-room boxes to loot. So
+  about half the ordinary houses are left out and the ones that stay grow
+  into the gap. On a test town at 2 m a tile that turned 140 houses of one
+  room each into 95 of four - the same street, in houses worth going into.
+
+  Which houses go is a spacing rule rather than a coin toss: the larger house
+  of a crowded pair survives, and a farmhouse with a field around it is never
+  touched. It uses no random stream at all, so the same seed still gives the
+  same town.
+
+- **A police station the size of a police station.** With true map generation
+  off, the buildings a town is known by - the station, the fire station, the
+  school, the hospital, the supermarket - are never left out, are placed
+  before the housing so the ground they need is still free, and are built at
+  the size the game gives that kind of building rather than the size somebody
+  traced. OSM decides that there is a police station here; what a police
+  station is, is the game's business.
+
+  A station mapped as its front office came out as 42 tiles - a hut with a
+  desk in it - where the game's own is ten times that. It now grows to about
+  220, the school to 1100, the hospital to 800, and stops short of whatever
+  stands next to it rather than swallowing it.
+
+  Buildings that only the land around them identifies are covered too: the
+  huts on an army base and the wings of a hospital used to read as untagged
+  houses and be thinned away with them, which on one test map took away the
+  barracks the whole map's rifles were going to spawn in.
+
+- **One rifle, guaranteed.** The M16 spawns from army and police loot and
+  almost nowhere else, and a real town has no checkpoints in it and usually
+  no gun shop, so a generated map could contain no container anywhere that
+  could ever roll one. Every map now gets one, in the best place it actually
+  has: an army building, else the police station, else a gun shop, else a
+  house out on the edge of town, as the survivor who had it.
+
+  It goes in the first container the game fills inside that building, once
+  per map per save, and it ships with the map as `KnoxMapGunCache.lua`. It
+  cannot be baked into the building: a `.tbx` holds walls, floors and
+  furniture and no items at all, and what is in a container is rolled by the
+  game the first time somebody walks in. Turn it off with *Guaranteed rifle*
+  if you would rather the town stayed as peaceful as it really is.
+
 ## 1.3.9 rnd
 
 - **The updater could not see a named release.** It matched a download by

@@ -1273,6 +1273,11 @@ def api_compile_status():
     state["expected"] = _expected_cells(map_dir)
     state["tmx"] = len(list((map_dir / "tmx").glob("*.tmx"))) \
         if (map_dir / "tmx").is_dir() else 0
+    # Cells the last compile tried three times and could not do. It steps over
+    # them rather than throwing away the hours already spent, so this is how
+    # the window knows to offer them again instead of saying "done".
+    from tools.compile_map import failed_cells
+    state["failed"] = failed_cells(map_dir)
     return jsonify(state)
 
 
@@ -1298,6 +1303,15 @@ def api_compile():
     pzw = map_dir / f"{map_dir.name}.pzw"
     if not pzw.exists():
         return jsonify({"error": "No .pzw yet — generate the buildings first."}), 400
+
+    # "Compile the cells that failed" rather than the whole town again. A full
+    # re-run would skip the batches already on disk anyway, but it walks every
+    # one of them to find that out, and on a big map that is minutes before it
+    # reaches the handful that matter.
+    from tools.compile_map import failed_cells
+    only = [f["cells"] for f in failed_cells(map_dir)] if data.get("onlyFailed") else None
+    if data.get("onlyFailed") and not only:
+        return jsonify({"error": "Nothing is recorded as failed."}), 400
 
     (map_dir / "tmx").mkdir(exist_ok=True)
     (map_dir / "lots").mkdir(exist_ok=True)
@@ -1332,7 +1346,8 @@ def api_compile():
         try:
             produced = compiler.compile_map(str(map_dir), batch=COMPILE_BATCH,
                                             exe=str(exe), on_progress=note,
-                                            should_stop=_stopper(name))
+                                            should_stop=_stopper(name),
+                                            only_cells=only)
             if not produced:
                 eid = knoxlog.record(None, f"compile {name}: produced no cells")
                 with _PROGRESS_LOCK:
@@ -1340,9 +1355,13 @@ def api_compile():
                                       "error": "Compile produced no cells."}
                 return
             log.info("compile %s: %d cells in %.0fs", name, produced, time.time() - t0)
+            # A compile that stepped over a batch is finished but not whole:
+            # installing it gives a map with a hole in it, so the window is
+            # told what is missing rather than a plain "done".
+            left = compiler.failed_cells(str(map_dir))
             with _PROGRESS_LOCK:
                 mapstate.stamp(str(map_dir), "compile")
-                _COMPILE[name] = {"state": "done", "error": None}
+                _COMPILE[name] = {"state": "done", "error": None, "failed": left}
         except knoxstop.Stopped:
             log.info("compile %s: stopped after %.0fs", name, time.time() - t0)
             _done_stopping(name)

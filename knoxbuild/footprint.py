@@ -157,6 +157,64 @@ def split_row(fp: "Footprint", unit_tiles: int,
     return out or [fp]
 
 
+def _hug(mask: np.ndarray, x0: int, y0: int) -> tuple[np.ndarray, int, int]:
+    """The mask's biggest piece, in a box trimmed to hold only that."""
+    mask = _largest_component(mask)
+    rows = np.where(mask.any(axis=1))[0]
+    cols = np.where(mask.any(axis=0))[0]
+    if len(rows) == 0:
+        return mask[:0, :0], x0, y0
+    return (mask[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1],
+            x0 + int(cols[0]), y0 + int(rows[0]))
+
+
+# A building reaches the game as a lot, and a lot is a rectangle: the .pzw
+# says <lot x y width height> and WorldEd writes that whole rectangle of
+# squares into the cell. A footprint off the grid owns a staircase of tiles
+# inside its rectangle and nothing else, so most of that rectangle is ground
+# the building never claimed - and the next building along claims it, because
+# `occupied` only ever held the tiles. On Brugge that came to 5004 pairs of
+# lots standing on top of each other among 4202 buildings, overlapping by
+# whole rows rather than the single shared column a terrace wants. Where two
+# lots cover a square, one is written over the other and a wall goes missing.
+#
+# So a footprint claims its rectangle as well as its tiles, and a later one is
+# cut back to the biggest part of itself whose rectangle is still free. Real
+# neighbours still stand wall to wall: their rectangles meet along an edge,
+# and the wall between them is the one column both of them draw.
+def _clear_box(mask: np.ndarray, blocked: np.ndarray) -> tuple[int, int, int, int]:
+    """The box holding most of `mask` and no `blocked` tile, half open.
+
+    Cutting a row off the near side, as a nudge would, is no use when the lot
+    in the way sits along the middle of the footprint, so every rectangle of
+    free ground is measured - the row-by-row histogram scan that finds them -
+    and the one keeping the most of the building wins. A footprint therefore
+    gives up whichever end of itself is emptiest, and one that has nowhere
+    left to stand gives up altogether.
+    """
+    h, w = mask.shape
+    # How much of the building any box holds, in one subtraction.
+    held = np.zeros((h + 1, w + 1), dtype=np.int32)
+    held[1:, 1:] = mask.cumsum(0).cumsum(1)
+    best = (0, 0, 0, 0, 0)
+    heights = np.zeros(w, dtype=np.int32)
+    for y in range(h):
+        # Free tiles standing one above another, counting up to this row.
+        heights = np.where(blocked[y], 0, heights + 1)
+        stack: list[tuple[int, int]] = []
+        for x, tall in enumerate(heights.tolist() + [0]):
+            start = x
+            while stack and stack[-1][1] >= tall:
+                start, high = stack.pop()
+                top = y + 1 - high
+                tiles = int(held[y + 1, x] - held[top, x]
+                            - held[y + 1, start] + held[top, start])
+                if tiles > best[0]:
+                    best = (tiles, top, y + 1, start, x)
+            stack.append((start, tall))
+    return best[1:]
+
+
 NUDGE_TILES = 5
 
 
@@ -199,7 +257,8 @@ def _clear_of(mask: np.ndarray, x0: int, y0: int, avoid: np.ndarray,
 def place(px: list[tuple[float, float]], occupied: np.ndarray,
           min_side: float = 0, max_side: float = 1e9,
           snap_degrees: float = SNAP_DEGREES,
-          avoid: np.ndarray | None = None
+          avoid: np.ndarray | None = None,
+          lots: np.ndarray | None = None
           ) -> tuple[Footprint | None, str]:
     """Rasterise a projected footprint, claiming its tiles in `occupied`.
 
@@ -210,6 +269,11 @@ def place(px: list[tuple[float, float]], occupied: np.ndarray,
     Tiles another building already owns are left to it. Real neighbours share
     walls; two buildings claiming the same tile would put one wall inside the
     other.
+
+    `lots` is the ground already covered by a building's lot rectangle rather
+    than by its tiles (_clear_box). Passed in, the footprint is cut back until
+    its own rectangle stands clear of every other, and its rectangle is
+    claimed there in turn.
     """
     map_h, map_w = occupied.shape
     poly = _polygon(px)
@@ -266,14 +330,22 @@ def place(px: list[tuple[float, float]], occupied: np.ndarray,
     mask &= ~occupied[cy0:cy1, cx0:cx1]
     if mask.sum() < MIN_TILES:
         return None, "taken"
-    mask = _largest_component(mask)
-
     # Trim empty rows and columns so the box hugs what is left.
-    rows = np.where(mask.any(axis=1))[0]
-    cols = np.where(mask.any(axis=0))[0]
-    mask = mask[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
-    fx0, fy0 = cx0 + int(cols[0]), cy0 + int(rows[0])
+    mask, fx0, fy0 = _hug(mask, cx0, cy0)
     if mask.sum() < MIN_TILES:
         return None, "taken"
+
+    # ...and cut it back again where the box that hugs it would stand on a
+    # lot already placed, even though the tiles under it are free.
+    if lots is not None:
+        blocked = lots[fy0:fy0 + mask.shape[0], fx0:fx0 + mask.shape[1]]
+        if blocked.any():
+            by0, by1, bx0, bx1 = _clear_box(mask, blocked)
+            mask, fx0, fy0 = _hug(mask[by0:by1, bx0:bx1], fx0 + bx0, fy0 + by0)
+            if mask.sum() < MIN_TILES:
+                return None, "taken"
+
     occupied[fy0:fy0 + mask.shape[0], fx0:fx0 + mask.shape[1]] |= mask
+    if lots is not None:
+        lots[fy0:fy0 + mask.shape[0], fx0:fx0 + mask.shape[1]] = True
     return Footprint(fx0, fy0, mask, angle, sides[0], sides[1]), "ok"
