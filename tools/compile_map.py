@@ -111,6 +111,9 @@ if sys.platform == "win32":
         belong to this hidden desktop and are physically impossible for DWM
         to composite onto the user's display, guaranteeing 0 ms visibility
         and zero flashes without any polling overhead.
+        
+        A background thread proxies error popups (or long-hanging dialogs)
+        to the user's default desktop so they can be dismissed.
         """
         def __init__(self, cmd, stdout_f, stderr_f, env=None):
             self.cmd = cmd
@@ -152,6 +155,61 @@ if sys.platform == "win32":
             self._hThread = pi.hThread
             self.pid = pi.dwProcessId
             self.returncode = None
+            
+            # Start error popup proxy thread
+            self._monitor_thread = __import__("threading").Thread(target=self._monitor_popups, daemon=True)
+            self._monitor_thread.start()
+
+        def _monitor_popups(self):
+            seen_times = {}
+            proxied = set()
+            
+            EnumDesktopWindows = ctypes.windll.user32.EnumDesktopWindows
+            EnumDesktopWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+            
+            def enum_proc(hwnd, lParam):
+                if not ctypes.windll.user32.IsWindowVisible(hwnd):
+                    return True
+                if hwnd in proxied:
+                    return True
+                    
+                length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                buf = ctypes.create_unicode_buffer(length + 1)
+                ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+                title = buf.value
+                
+                now = time.time()
+                if hwnd not in seen_times:
+                    seen_times[hwnd] = now
+                    
+                elapsed = now - seen_times[hwnd]
+                title_lower = title.lower()
+                
+                is_error = "error" in title_lower or "warning" in title_lower or "exception" in title_lower
+                is_timeout = elapsed > 60.0
+                
+                if is_error or is_timeout:
+                    proxied.add(hwnd)
+                    msg = (f"PZWorldEd popup detected.\n\n"
+                           f"Title: {title}\n"
+                           f"Reason: {'Error keyword in title' if is_error else 'Open for > 1 minute'}\n\n"
+                           f"Click OK to dismiss it and continue.")
+                    # Show on default desktop
+                    ctypes.windll.user32.MessageBoxW(0, msg, "PZWorldEd error plausible", 0)
+                    # Close the hidden window
+                    ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0) # WM_CLOSE
+                    
+                return True
+                
+            c_enum_proc = EnumDesktopWindowsProc(enum_proc)
+            
+            while self._hdesk is not None and self.returncode is None:
+                # EnumDesktopWindows blocks until all windows are enumerated
+                try:
+                    EnumDesktopWindows(self._hdesk, c_enum_proc, 0)
+                except Exception:
+                    pass
+                time.sleep(1.0)
 
         def poll(self):
             if self.returncode is not None:
