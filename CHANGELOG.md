@@ -2,6 +2,24 @@
 
 ## 1.4
 
+- **KnoxMap.exe is built the way Windows software is built.** The launcher is
+  a small binary whose whole job is to start Setup once and then the window -
+  two `CreateProcessW` calls and nothing else. That is structurally what a
+  dropper is, and it was built with mingw-w64, whose output is heavily
+  over-represented in the corpora antivirus heuristics are trained on. The
+  same source now compiles with MSVC on a Windows runner, which is what the
+  rest of Windows software is compiled with, and it is no longer stripped: a
+  tiny binary with every symbol taken out of it reads as something with
+  something to hide, and 30 KB was not worth that.
+
+  `win/build_launcher.sh` still builds the identical launcher with mingw-w64
+  on Linux, and CI still checks that it does, so what ships can be reproduced
+  without Visual Studio.
+
+  None of this is a substitute for a code signing certificate, which is the
+  only real answer to "Windows protected your PC" - but it is free, and it
+  stops the file looking like the thing it is not.
+
 - **The size limits are advice now, not a wall.** Draw too big an area and
   KnoxMap used to grey the **Generate map** button out and answer the request
   with an error: over 400 km², over 9,000 tiles a side, or more memory than

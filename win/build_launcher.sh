@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Build KnoxMap.exe, the launcher people double-click, with mingw-w64.
 #
+# The release builds it with MSVC instead (win/build_launcher.ps1),
+# because antivirus heuristics treat a small mingw-built binary that
+# spawns a process as the thing it structurally resembles. This is the
+# same launcher from the same source, for building on Linux - and for
+# anyone who would rather not need Visual Studio to check what ships.
+#
 #     sudo apt install gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64
 #     win/build_launcher.sh [version]
 #
@@ -38,7 +44,9 @@ sed -e "s/@MAJOR@/$major/g" -e "s/@MINOR@/$minor/g" -e "s/@PATCH@/$patch/g" \
 
 # -mwindows: no console window of its own. -municode: wWinMain, so the whole
 # launcher is wide-character and a folder with any name in it works.
-"$CC" -O2 -s -municode -mwindows -Wall -Wextra \
+# No -s: a tiny binary with every symbol stripped out of it reads as
+# something with something to hide, and 30 KB is not worth that.
+"$CC" -O2 -municode -mwindows -Wall -Wextra \
       -o KnoxMap.exe win/knoxmap_launcher.c "$work/knoxmap.res" -luser32
 
 echo "built KnoxMap.exe for KnoxMap $version"
