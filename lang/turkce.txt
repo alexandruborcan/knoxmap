@@ -11,6 +11,7 @@
 # Turkce - Turkish.
 
 0.5 m per tile (small areas) = karo başına 0,5 m (küçük alanlar)
+1 adds the buildings OpenStreetMap has not got, from Overture Maps - OSM plus machine-detected roofprints, same licence. Worth it where your town is half missing from OSM; elsewhere it adds sheds. Needs DuckDB. = 1, OpenStreetMap'te olmayan binaları Overture Maps'ten ekler - OSM artı makineyle bulunmuş çatı izleri, aynı lisans. Kasabanın yarısı OSM'de yoksa değer; değilse sadece baraka ekler. DuckDB gerekir.
 1 builds every address as mapped. 0 keeps the real roads, rivers, woods and terrain, but leaves out half the houses and grows the rest into proper homes with yards. Named places are always built, at the game’s size. = 1, haritadaki her adresi olduğu gibi kurar. 0 ise gerçek yolları, nehirleri, ormanları ve araziyi korur ama evlerin yarısını dışarıda bırakıp kalanları bahçeli, düzgün evlere dönüştürür. İsimli yerler her zaman, oyundaki boyutlarıyla kurulur.
 1 lays every road in straight runs along the tiles and on 45-degree diagonals, and stands every building upright beside them, like the game’s own map. 0 draws roads as they are. = 1, her yolu karolar boyunca ve 45 derecelik çaprazlarda düz olarak döşer ve her binayı yanlarına dik oturtur, oyunun kendi haritası gibi. 0 ise yolları olduğu gibi çizer.
 1 leaves one military rifle on the map: in an army building if there is one, else the police station, else a gun shop, else a house on the edge of town. A real town has no checkpoints for one to spawn in. = 1, haritaya bir askeri tüfek bırakır: varsa bir askeri binaya, yoksa karakola, yoksa silah dükkânına, yoksa kasabanın kenarındaki bir eve. Gerçek bir kasabada tüfeğin çıkabileceği kontrol noktası yoktur.
@@ -72,6 +73,7 @@ Each person who lived or worked here becomes this many zombies. = Burada yaşaya
 Enable "Elevators" too, for working lifts in tall buildings. = Yüksek binalarda asansörlerin çalışması için "Elevators"ı da etkinleştir.
 File → BMP To TMX → All Cells… = Dosya → BMP To TMX → All Cells…
 File → Generate Lots 8x8 → All Cells… = Dosya → Generate Lots 8x8 → All Cells…
+Fill gaps from Overture = Overture ile boşlukları doldur
 Finish the map = Haritayı bitir
 Flats above = Şu boyutun üstü apartman
 Flats chance = Apartman olma ihtimali
@@ -121,6 +123,7 @@ OpenStreetMap lists = OpenStreetMap şunu listeliyor:
 Or do it yourself in WorldEd = Ya da WorldEd'de kendin yap
 Other drives or folders (separated by ;) = Diğer sürücüler veya klasörler (; ile ayır)
 out on the street = sokakta
+Overture Maps data (optional) = Overture Maps verisi (isteğe bağlı)
 Population = Nüfus
 press Compile to carry on from there. = oradan devam etmek için Derle'ye bas.
 Preview = Önizleme

@@ -266,23 +266,33 @@ def _only_local():
         return ("KnoxMap only answers requests from this computer.", 403)
 
 
-# Safety rails. The area cap used to be 20 km² because one Overpass query that
-# size is about all the API will answer; osm.fetch_features_tiled lifts that by
-# splitting a big request into a grid of small ones, so the real limits now are
-# render memory and patience.
+# Where a map stops being an easy one. None of these refuses anything: they
+# are what the window warns about, and what the log records, so somebody who
+# wants a whole city can have one and knows what they are in for.
 #
-# MAX_TILES_PER_SIDE is the memory rail: the renderer holds a landscape and a
+# They used to be hard limits, and a limit that says no is worth having only
+# when the thing behind it cannot be done. These can: the area cap was
+# originally 20 km2 because that is about all one Overpass query will answer,
+# and osm.fetch_features_tiled lifted that by splitting a big request into a
+# grid of small ones. What is left is memory and patience, and both are the
+# mapper's to spend.
+#
+# BIG_TILES_PER_SIDE is the memory one: the renderer holds a landscape and a
 # vegetation image at full size, 3 bytes a tile each, so 9000 tiles a side is
-# about 490 MB of pixels before anything else. Raise it only with RAM to match.
-MAX_AREA_KM2 = 400.0
+# about 490 MB of pixels before anything else.
+BIG_AREA_KM2 = 400.0
 OVERPASS_TILE_KM2 = 30.0       # size of each sub-query; overshoot re-splits
-MAX_TILES_PER_SIDE = 9000      # 30 cells at 300 tiles each
-MIN_METERS_PER_TILE = 0.5
-MAX_METERS_PER_TILE = 8.0
+BIG_TILES_PER_SIDE = 9000      # 30 cells at 300 tiles each
+# A scale still has to be a scale: zero or a negative divides the world by
+# nothing. The range the window offers is 0.5 to 8; outside it is allowed and
+# said to be unusual.
+MIN_METERS_PER_TILE = 0.01
+MAX_METERS_PER_TILE = 100.0
+USUAL_METERS_PER_TILE = (0.5, 8.0)
 
-# Landmark lookup asks for far more tag keys than the terrain query, so it stays
-# on a tighter leash.
-MAX_LANDMARK_KM2 = 40.0
+# Landmark lookup asks for far more tag keys than the terrain query, so it is
+# the first thing to get slow.
+BIG_LANDMARK_KM2 = 40.0
 
 SAFE_NAME = re.compile(r"[^A-Za-z0-9_-]+")
 
@@ -526,8 +536,11 @@ def api_landmarks():
     except (KeyError, TypeError, ValueError):
         return jsonify({"error": "Need south, west, north and east."}), 400
 
-    if _bbox_area_km2(south, west, north, east) > MAX_LANDMARK_KM2:
-        return jsonify({"error": f"Landmark lookup is limited to {MAX_LANDMARK_KM2:g} km² — zoom in or draw a smaller box."}), 400
+    landmark_area = _bbox_area_km2(south, west, north, east)
+    if landmark_area > BIG_LANDMARK_KM2:
+        # Slow, not impossible. It used to be refused outright.
+        log.info("landmarks: %.1f km2, over the %g km2 this gets slow at",
+                 landmark_area, BIG_LANDMARK_KM2)
 
     try:
         found = places.landmarks(south, west, north, east)
@@ -690,13 +703,22 @@ def generate():
     if problem:
         return jsonify({"error": problem}), 400
     if not (MIN_METERS_PER_TILE <= meters_per_tile <= MAX_METERS_PER_TILE):
-        return jsonify({"error": "Scale out of allowed range."}), 400
+        return jsonify({"error": f"Metres per tile has to be between "
+                                 f"{MIN_METERS_PER_TILE:g} and "
+                                 f"{MAX_METERS_PER_TILE:g}."}), 400
 
+    # Nothing below refuses the map. These are what the window has already
+    # warned about; they are logged here so a report from somebody whose map
+    # died halfway says how big it was.
+    heavy: list[str] = []
     area_km2 = _bbox_area_km2(south, west, north, east)
-    if area_km2 > MAX_AREA_KM2:
-        return jsonify({
-            "error": f"Area {area_km2:.2f} km² exceeds limit of "
-                     f"{MAX_AREA_KM2} km². Select a smaller region."}), 400
+    if area_km2 > BIG_AREA_KM2:
+        heavy.append(f"{area_km2:.0f} km2, over the {BIG_AREA_KM2:g} km2 a map "
+                     f"usually is")
+    if not (USUAL_METERS_PER_TILE[0] <= meters_per_tile <= USUAL_METERS_PER_TILE[1]):
+        heavy.append(f"{meters_per_tile:g} m a tile, outside the "
+                     f"{USUAL_METERS_PER_TILE[0]:g}-{USUAL_METERS_PER_TILE[1]:g} "
+                     f"the window offers")
 
     raw_name = data.get("mapName") or f"knoxify_{int(time.time())}"
     map_name = SAFE_NAME.sub("_", raw_name).strip("_") or f"knoxify_{int(time.time())}"
@@ -704,14 +726,15 @@ def generate():
     # Upper bound on the final bitmap size before we even hit Overpass.
     approx_w = ((east - west) * 111320 * _cos_lat((south + north) / 2)) / meters_per_tile
     approx_h = ((north - south) * 111320) / meters_per_tile
-    if max(approx_w, approx_h) > MAX_TILES_PER_SIDE:
-        return jsonify({
-            "error": f"Requested map is too large (~{int(approx_w)}×"
-                     f"{int(approx_h)} tiles). Pick a smaller area or a larger "
-                     f"meters-per-tile scale."}), 400
-    too_big = _too_big_for_memory(approx_w, approx_h)
-    if too_big:
-        return jsonify({"error": too_big}), 400
+    if max(approx_w, approx_h) > BIG_TILES_PER_SIDE:
+        heavy.append(f"{int(approx_w)}x{int(approx_h)} tiles, over the "
+                     f"{BIG_TILES_PER_SIDE} a side that is comfortable")
+    tight = _too_big_for_memory(approx_w, approx_h)
+    if tight:
+        heavy.append(tight)
+    if heavy:
+        log.warning("generate %s: going ahead with a heavy map - %s",
+                    map_name, "; ".join(heavy))
 
     t0 = time.time()
     log.info("generate %s: %.5f,%.5f,%.5f,%.5f at %s m/tile, %.2f km2", map_name,
@@ -766,6 +789,27 @@ def generate():
         except OSError:
             pass  # a map that cannot be cached still renders
 
+    # Buildings Overture has and OpenStreetMap has not, before anything is
+    # measured from them: they are ordinary building features from here on,
+    # so the street angle, the ground, the gardens and the .tbx all see them
+    # exactly as they see a mapped one (generator/overture.py).
+    gaps = {"added": 0}
+    if settings.fill_gaps:
+        from generator import overture
+        _set_progress(map_name, stage="overture", done=0, total=1)
+        try:
+            features, gaps = overture.add_missing(
+                features, fetch_box, str(map_dir), map_name,
+                should_stop=_stopper(map_name))
+        except knoxstop.Stopped:
+            return _stopped(map_name, "generate")
+        except Exception as exc:  # noqa: BLE001 - OSM alone still makes a map
+            log.warning("overture %s: %s", map_name, exc)
+            gaps = {"added": 0, "error": str(exc)}
+        if gaps.get("added"):
+            log.info("overture %s: %d buildings OSM had not got, from %d fetched",
+                     map_name, gaps["added"], gaps.get("fetched", 0))
+
     rotation = 0.0
     if settings.align_streets:
         angle, strength = renderer.dominant_road_angle(features, *bbox)
@@ -796,6 +840,19 @@ def generate():
         )
     except knoxstop.Stopped:
         return _stopped(map_name, "generate")
+    except MemoryError:
+        # Nothing refuses a big map any more, so this is where one that really
+        # was too big lands. Say what it would have taken rather than a
+        # traceback: the numbers are the ones the window already showed.
+        need = approx_w * approx_h * BYTES_PER_TILE + BASE_BYTES
+        _set_progress(map_name, stage="error", message="ran out of memory")
+        return failed(
+            f"The map ran out of memory while it was being drawn. It needs about "
+            f"{need / 1e9:.1f} GB for the ground and the greenery alone, at "
+            f"{int(approx_w)}x{int(approx_h)} tiles. Close a few things and try "
+            f"again, or draw it at a larger scale - 2 m a tile is a quarter of "
+            f"the memory of 1 m. Everything downloaded is kept, so a second run "
+            f"starts from the OpenStreetMap data already on disk.", 507)
 
     _write_readme(map_dir, map_name, result)
     _set_progress(map_name, stage="done")
@@ -807,9 +864,9 @@ def generate():
     except (OSError, ValueError):
         pass
     log.info("generate %s: done, %d features, %dx%d tiles, rotation %.1f, "
-             "%d houses from addresses, %.1fs (download %.1fs)", map_name, len(features),
-             result.width, result.height, rotation, from_addresses,
-             time.time() - t0, osm_time)
+             "%d houses from addresses, %d from Overture, %.1fs (download %.1fs)",
+             map_name, len(features), result.width, result.height, rotation,
+             from_addresses, gaps.get("added", 0), time.time() - t0, osm_time)
 
     return jsonify({
         "mapName": map_name,
@@ -820,6 +877,13 @@ def generate():
         "featureCount": len(features),
         "rotation": round(rotation, 1),
         "osmSeconds": round(osm_time, 2),
+        # What Overture put in that OpenStreetMap had not got, so the window
+        # can say whether turning it on was worth it here.
+        # What the window warned about and the mapper went ahead with anyway,
+        # so it can say so beside the finished map too.
+        "heavy": heavy,
+        "fromOverture": gaps.get("added", 0),
+        "overtureError": gaps.get("error") or gaps.get("why") or "",
         "files": {
             "landscape": f"/output/{map_name}/{Path(result.landscape_path).name}",
             "vegetation": f"/output/{map_name}/{Path(result.vegetation_path).name}",
@@ -1170,6 +1234,12 @@ def api_setup_status():
         {"id": "spawn_selector", "ok": knoxpaths.spawn_selector_installed(),
          "label": "Spawn Selector mod (optional)",
          "fix": "Subscribe to it on the Steam Workshop to start at any landmark of your map."},
+        {"id": "overture", "ok": _overture_ready(),
+         "label": "Overture Maps data (optional)",
+         "fix": "Needed only for Fill gaps from Overture, which adds the buildings "
+                "OpenStreetMap has not got. Install DuckDB into the Python inside "
+                "KnoxMap's own .venv folder: python -m pip install duckdb. Worth it "
+                "where your town is half missing from OSM; nothing else needs it."},
         {"id": "erikas_tiles", "ok": knoxpaths.erikas_tiles_ready(),
          "label": "Erika's Tiles (optional)",
          "fix": f"Subscribe to it on the Steam Workshop and run {setup} again for glass shop "
@@ -1214,6 +1284,16 @@ def _has_road_rules(tools) -> bool:
     # patched while the litter rule still named trash_01_13 and 14, which the
     # game draws as a question mark.
     return "KnoxMap road Yard bed_soil" in text and "trash_01_13" not in text
+
+
+def _overture_ready() -> bool:
+    """Whether gap-filling from Overture can run here. Kept off the import
+    path: the check is one import and the window asks for it on every poll."""
+    try:
+        from generator import overture
+        return overture.available()
+    except Exception:  # noqa: BLE001 - a broken optional extra is just absent
+        return False
 
 
 @app.route("/api/settings")

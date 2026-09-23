@@ -1,5 +1,79 @@
 # Changelog
 
+## 1.4
+
+- **The size limits are advice now, not a wall.** Draw too big an area and
+  KnoxMap used to grey the **Generate map** button out and answer the request
+  with an error: over 400 km², over 9,000 tiles a side, or more memory than
+  the PC had free. Somebody who wanted a whole city could not have one at
+  all, whatever their machine.
+
+  Every one of those is a warning now and the button stays lit. The panel says
+  what the area will cost — the tiles, the gigabytes of ground and greenery
+  held at once, how many OpenStreetMap queries — and adds that raising metres
+  per tile is the cheapest fix, because 2 m a tile is a quarter of the memory
+  of 1 m. Then it gets out of the way. Landmark lookup is the same: over
+  40 km² it is slow, so it says so instead of refusing.
+
+  A limit that says no is worth having only when the thing behind it cannot be
+  done. These can be done; what they cost is the mapper's to spend.
+
+  What is still refused is a scale that is not a scale — zero, a negative, or
+  something absurd — because dividing the world by nothing is not a map
+  anybody asked for.
+
+  And if a map really is too big, it now fails like a grown-up. Running out of
+  memory mid-render used to be a traceback; it says how much the map needed,
+  at what size, that raising the scale is the fix, and that everything
+  downloaded is kept so a second attempt starts from the data already on disk.
+
+- **The buildings OpenStreetMap has not got.** A new setting under *Fine
+  tuning*: **Fill gaps from Overture**. OpenStreetMap is drawn by people, so
+  how much of a town is on it depends on who lives there and whether anyone
+  has traced it. Generate a German town and every building is there; generate
+  one in plenty of the rest of the world and you get the high street, a
+  school, and empty land where the other two thirds of the town is.
+
+  [Overture Maps](https://overturemaps.org) publishes a buildings theme that
+  is OpenStreetMap first and machine-detected roofprints second, under the
+  same ODbL licence. Turned on, every building Overture has that OSM does not
+  is added before anything else runs, so the ground, the gardens, the street
+  angle and the .tbx all treat it exactly as they treat a mapped one.
+
+  Measured over the same size of box, on two real towns:
+
+  | | OSM has | Overture adds | median size of the new ones |
+  |---|---|---|---|
+  | Gifhorn, Germany | 1,962 | **60** (3%) | 38 m² — sheds and garages |
+  | Ürgüp, Turkey | 473 | **761** (62%) | 87 m² — houses |
+
+  So it is **off by default**. Where OSM is complete it adds sheds and costs a
+  few minutes; where OSM is thin it nearly trebles the town. You can see which
+  case you are in from the preview before you turn it on.
+
+  Overture's `class` is OpenStreetMap's own building values — house,
+  apartments, barn, church — so where it has one the building arrives already
+  classified. The machine-found ones have none and arrive as plain
+  footprints, which is what they are; the generator reads the land around
+  them for the rest, as it does for any untagged building.
+
+  It needs DuckDB, because the data is GeoParquet on S3 and there is no
+  bounding-box API for it. That is not a small install, so it is optional and
+  listed under the optional extras with what to type. Everything else works
+  without it. One fetch takes two to three minutes, nearly all of it spent
+  finding which of Overture's files cover your box, so the answer is kept
+  beside the map like the Overpass one — and a map that has been fetched once
+  re-renders with no DuckDB at all, on any PC, including one you hand the
+  folder to.
+
+  A map built this way credits Overture in its `ATTRIBUTION.txt` alongside
+  OpenStreetMap, which ODbL asks for; one built without it is unchanged.
+
+  This does not replace the houses KnoxMap already invents from OSM's own
+  address points — those are the homes somebody numbered but never drew, 22
+  of them in Gifhorn and 20 in Ürgüp, and they are still filled in afterwards
+  wherever nothing stands.
+
 ## 1.3.9.2
 
 - **Floating windows, and walls with holes beside them.** Reported on a

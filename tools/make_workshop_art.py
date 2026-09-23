@@ -31,6 +31,58 @@ SHOT = (1920, 1080)
 BACKGROUND = (20, 24, 15)
 
 
+
+# The thumbnail is the roofs-off render with the wordmark on a band across
+# the foot. Steam lists an item at about a hundred pixels beside its title,
+# and at that size the old thumbnail - half of it a black bar of unreadable
+# text over a thin strip of map - was a dark smudge in a dark list. The band
+# is the only part of it that carries at that size, and the render fills the
+# rest instead of being squeezed into a strip.
+WORDMARK = "KnoxMap"
+STRAPLINE = "REAL PLACES, PLAYABLE IN PROJECT ZOMBOID"
+GREEN = (165, 226, 102)          # the pin in branding/logo.svg
+INK = (18, 22, 14)
+BAND = 120
+# Of the 1920x1080 render, the quarter with the most furnished rooms in it
+# and a corner of the park for colour. The rooms are what is worth showing:
+# a park at this size is a green blob.
+THUMB_CROP = (480, 280, 1280, 1080)
+# Bold and wide, whatever the machine has. The picture ships, not the font.
+FONTS = ("segoeuib.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf",
+         "LiberationSans-Bold.ttf", "Helvetica.ttc")
+
+
+def _font(px: int):
+    from PIL import ImageFont
+
+    here = Path("C:/Windows/Fonts")
+    for name in FONTS:
+        for folder in (here, Path("/usr/share/fonts/truetype/dejavu"),
+                       Path("/usr/share/fonts/truetype/liberation"),
+                       Path("/System/Library/Fonts")):
+            path = folder / name
+            if path.exists():
+                try:
+                    return ImageFont.truetype(str(path), px)
+                except OSError:
+                    pass
+    return ImageFont.load_default()
+
+
+def thumbnail(render: Path) -> Image.Image:
+    """The 512x512 card Steam shows beside the item's name."""
+    from PIL import ImageDraw
+
+    im = Image.open(render).convert("RGB").crop(THUMB_CROP)
+    im = im.resize(PREVIEW, Image.Resampling.LANCZOS)
+    im.paste(Image.new("RGB", (PREVIEW[0], BAND), GREEN), (0, PREVIEW[1] - BAND))
+    draw = ImageDraw.Draw(im)
+    draw.text((26, PREVIEW[1] - BAND + 10), WORDMARK, font=_font(58), fill=INK)
+    draw.text((29, PREVIEW[1] - BAND + 82), STRAPLINE, font=_font(18),
+              fill=(44, 60, 28))
+    return im
+
+
 def fit(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     """`image` centred on the project's background, cropped to fill."""
     want_w, want_h = size
@@ -156,25 +208,7 @@ def main(argv: list[str] | None = None) -> int:
         picture.save(SHOTS / filename)
         print(f"wrote {SHOTS / filename}")
 
-    # The thumbnail: the cover art over a strip of the town.
-    cover = Image.open(COVER).convert("RGB")
-    preview = Image.new("RGB", PREVIEW, BACKGROUND)
-    band = round(PREVIEW[1] * 0.46)
-    if made:
-        strip = trim(Image.open(made[0]).convert("RGBA"))
-        flat = Image.new("RGB", strip.size, BACKGROUND)
-        flat.paste(strip, mask=strip.split()[3])
-        # An isometric view is a diamond: its corners are empty, and fitting
-        # the whole of one into a thin band spends most of the band on
-        # background. The middle of it is all town, so that is what is taken.
-        keep = round(flat.height * 0.45)
-        flat = flat.crop((0, (flat.height - keep) // 2,
-                          flat.width, (flat.height + keep) // 2))
-        preview.paste(fit(flat, (PREVIEW[0], band)), (0, PREVIEW[1] - band))
-    art = cover.crop((150, 150, 1230, 520))
-    art = art.resize((PREVIEW[0], round(art.height * PREVIEW[0] / art.width)),
-                     Image.Resampling.LANCZOS)
-    preview.paste(art, (0, (PREVIEW[1] - band - art.height) // 2))
+    preview = thumbnail(SHOTS / "02-town.png")
     preview.save(OUT / "preview.png")
     print(f"wrote {OUT / 'preview.png'}")
 

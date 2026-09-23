@@ -6,9 +6,14 @@
 
 // Mirrors the server. Big areas are fetched as a grid of Overpass queries, so
 // the cap is render memory and patience rather than one API call's limit.
-const MAX_AREA_KM2 = 400.0;
-const MAX_TILES_PER_SIDE = 9000;
-const MAX_LANDMARK_KM2 = 40.0;
+// Where a map stops being an easy one. None of these stops anything: the
+// window says what you are in for and the button stays lit. A limit that says
+// no is worth having only when the thing behind it cannot be done, and a big
+// map can be done - it costs memory and patience, which are the mapper's to
+// spend.
+const BIG_AREA_KM2 = 400.0;
+const BIG_TILES_PER_SIDE = 9000;
+const BIG_LANDMARK_KM2 = 40.0;
 const OVERPASS_TILE_KM2 = 30.0;
 const SLOW_ABOVE_KM2 = 60.0;
 
@@ -234,19 +239,22 @@ function updateBboxFields() {
   const stats = document.getElementById('area-stats');
   const btn = document.getElementById('generateBtn');
   const side = Math.max(tilesX, tilesY);
-  let blocked = null;
-  if (area > MAX_AREA_KM2) {
-    blocked = `Too large — the limit is ${MAX_AREA_KM2} km².`;
-  } else if (side > MAX_TILES_PER_SIDE) {
-    blocked = `${side} tiles a side is over the ${MAX_TILES_PER_SIDE} limit — `
-            + 'raise metres per tile or shrink the area.';
+  const heavy = [];
+  if (area > BIG_AREA_KM2) {
+    heavy.push(`${Math.round(area)} km² is bigger than maps usually are `
+             + `(${BIG_AREA_KM2} km²).`);
   }
-  const slow = !blocked && area > SLOW_ABOVE_KM2;
-  const bitmap = pixelsMB < 1000 ? `${Math.round(pixelsMB)} MB`
-                                 : `${(pixelsMB / 1000).toFixed(1)} GB`;
-  const fill = Math.min(100, (area / MAX_AREA_KM2) * 100);
+  if (side > BIG_TILES_PER_SIDE) {
+    heavy.push(`${side} tiles a side is past what is comfortable `
+             + `(${BIG_TILES_PER_SIDE}) — about ${bitmapFor(tilesX, tilesY)} of `
+             + 'ground and greenery held in memory at once. Raising metres per '
+             + 'tile is the cheapest fix: 2 m is a quarter of the memory of 1 m.');
+  }
+  const slow = !heavy.length && area > SLOW_ABOVE_KM2;
+  const bitmap = bitmapFor(tilesX, tilesY);
+  const fill = Math.min(100, (area / BIG_AREA_KM2) * 100);
 
-  stats.className = blocked ? 'blocked' : (slow ? 'warn' : 'ok');
+  stats.className = heavy.length ? 'warn' : (slow ? 'warn' : 'ok');
   stats.innerHTML = `
     <div class="tiles">
       ${fx.tile(area, 'km²', 'area', area < 10 ? 2 : 1)}
@@ -263,18 +271,20 @@ function updateBboxFields() {
     ${selectionAreaKm2() !== null ? `<div class="stat-note shape">Only the drawn shape is built:
       <b>${selectionAreaKm2().toFixed(2)} km²</b> of this ${area.toFixed(2)} km² box. Outside it the land
       turns back to countryside, with the main roads and rivers running on.</div>` : ''}
-    ${blocked ? `<div class="stat-note bad">${blocked}</div>` : ''}
+    ${heavy.length ? `<div class="stat-note warn">${heavy.join(' ')}
+      You can still build it — this is a heads-up, not a wall.</div>` : ''}
     ${slow ? `<div class="stat-note warn">A big map — roughly ${Math.ceil(queries * 12 / 60)}+ min
       of OpenStreetMap queries before rendering starts.</div>` : ''}
   `;
   fx.countUp(stats);
-  btn.disabled = Boolean(blocked);
-  fx.step('area', blocked ? 'error' : 'done');
+  btn.disabled = false;
+  fx.step('area', 'done');
 
   const lm = document.getElementById('landmarksBtn');
-  lm.disabled = btn.disabled || area > MAX_LANDMARK_KM2;
-  lm.title = area > MAX_LANDMARK_KM2
-    ? `Landmark lookup is limited to ${MAX_LANDMARK_KM2} km².` : '';
+  lm.disabled = false;
+  lm.title = area > BIG_LANDMARK_KM2
+    ? `${Math.round(area)} km² is a lot to search for landmarks — it will take a while.`
+    : '';
 }
 
 function clearBboxFields() {
@@ -292,6 +302,13 @@ function clearBboxFields() {
 }
 
 document.getElementById('metersPerTile').addEventListener('change', updateBboxFields);
+
+// Landscape and vegetation, 3 bytes a tile each, held at full size while the
+// map is drawn. It is the number that decides whether a big map finishes.
+function bitmapFor(tilesX, tilesY) {
+  const mb = (tilesX * tilesY * 3 * 2) / 1e6;
+  return mb < 1000 ? `${Math.round(mb)} MB` : `${(mb / 1000).toFixed(1)} GB`;
+}
 
 function bboxAreaKm2(s, w, n, e) {
   const hKm = (n - s) * 111.32;
@@ -322,6 +339,7 @@ const SETTING_LABELS = {
   spawn_density:       ['Horde cap', 'Most zombies one 10×10 m spot can hold. Vanilla towns peak at 10.'],
   tree_density:        ['Woodland', 'Scales tree cover. Trees are cover to hide in.'],
   seed:                ['Seed', 'Same seed and area gives the same town again.'],
+  fill_gaps:           ['Fill gaps from Overture', '1 adds the buildings OpenStreetMap has not got, from Overture Maps - OSM plus machine-detected roofprints, same licence. Worth it where your town is half missing from OSM; elsewhere it adds sheds. Needs DuckDB.'],
   true_map:            ['True map generation', '1 builds every address as mapped. 0 keeps the real roads, rivers, woods and terrain, but leaves out half the houses and grows the rest into proper homes with yards. Named places are always built, at the game’s size.'],
   guaranteed_rifle:    ['Guaranteed rifle', '1 leaves one military rifle on the map: in an army building if there is one, else the police station, else a gun shop, else a house on the edge of town. A real town has no checkpoints for one to spawn in.'],
   min_size:            ['Smallest building', 'Buildings narrower than this many tiles are left out.'],
@@ -817,6 +835,11 @@ function startProgress(mapName) {
         status.textContent = total > 1
           ? `Querying OpenStreetMap — area ${(p.done || 0) + 1} of ${total}…`
           : 'Querying OpenStreetMap…';
+      } else if (p.stage === 'overture') {
+        // A few minutes, nearly all of it Overture's own files being sifted
+        // for the handful that cover this box. Saying so beats a dead bar.
+        status.textContent = 'Looking up the buildings OpenStreetMap has not got '
+                           + '— this takes a few minutes the first time…';
       } else if (p.stage === 'render') {
         status.textContent = `Rendering ${p.features.toLocaleString()} features `
                            + 'into bitmaps…';
@@ -951,7 +974,7 @@ function boundsForResult(r) {
   const km2 = bboxAreaKm2(s, w, n, e);
   const widthKm = haversineKm(s, w, s, e);
   const heightKm = haversineKm(s, w, n, w);
-  if (km2 <= MAX_AREA_KM2 && widthKm >= MIN_BOX_KM && heightKm >= MIN_BOX_KM) {
+  if (km2 <= BIG_AREA_KM2 && widthKm >= MIN_BOX_KM && heightKm >= MIN_BOX_KM) {
     return L.latLngBounds([s, w], [n, e]);
   }
   return boundsAround(r.lat, r.lon, DEFAULT_BOX_KM);

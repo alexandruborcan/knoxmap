@@ -64,6 +64,17 @@ class Settings:
     # the gap. Roads, rivers, woods and the terrain are still exactly as
     # mapped - only the housing is the game's rather than the survey's.
     true_map: int = 1
+    # Fill in the buildings OpenStreetMap has not got, from Overture Maps
+    # (generator/overture.py). OSM is drawn by people, so how much of a town
+    # is on it depends on who lives there: all of a German one, the high
+    # street and little else in plenty of the world. Overture publishes
+    # machine-detected roofprints under the same licence, and where OSM is
+    # blank they are the difference between a town and a few streets.
+    #
+    # Off by default, because where OSM is complete this adds sheds and costs
+    # a few minutes: measured over the same size of box, 60 buildings in
+    # Gifhorn against 761 in Urgup. Needs DuckDB installed.
+    fill_gaps: int = 0
     # Put one military rifle somewhere on the map, come what may. A real town
     # has no army checkpoint in it, so the game's rifles - which spawn from
     # army and police loot - may have nowhere at all to appear.
@@ -130,6 +141,7 @@ LIMITS = {
     "tree_density": (0.0, 3.0),
     "seed": (0, 2 ** 31 - 1),
     "true_map": (0, 1),
+    "fill_gaps": (0, 1),
     "guaranteed_rifle": (0, 1),
     # MIN_ROOM in layout.py is 3, and a building has to hold at least one room
     # plus its walls. MAX_BUILDING_DIMENSION in the reader is 300.

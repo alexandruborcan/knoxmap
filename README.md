@@ -166,6 +166,7 @@ Open **Fine tuning** under *Style*:
 
 | Setting | What it does |
 |---|---|
+| **Fill gaps from Overture** | 1 adds the buildings OpenStreetMap has not got, from [Overture Maps](https://overturemaps.org) — which is OSM plus machine-detected roofprints, under the same ODbL licence. Off by default: where OSM is complete it adds sheds (60 buildings on a German town), and where OSM is thin it nearly trebles the place (761 on a Turkish one). Needs DuckDB — `python -m pip install duckdb` into KnoxMap's own `.venv`. The fetch takes a few minutes and is then cached with the map. |
 | **True map generation** | 1 rebuilds every address the map has. 0 keeps the real roads, rivers, woods and terrain but lays the housing out for the game: about half the ordinary houses are left out and the ones that stay grow into the gap, so a street is proper homes with yards rather than rows of one-room boxes. Worth turning off at 2 m a tile or more, and on a town mapped at European density. |
 | **Guaranteed rifle** | 1 leaves one military rifle somewhere on the map: an army building if there is one, else the police station, else a gun shop, else a house on the edge of town. A real town has no army checkpoints in it, so without this the game's rifles may have nowhere at all they could spawn. |
 | **Zombies per person** | How many zombies each person who lived or worked there becomes. |

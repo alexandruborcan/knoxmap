@@ -1050,6 +1050,134 @@ def _sides_for(grid, x, y, d):
     return (at(x - 1, y), at(x, y)) if d == "W" else (at(x, y - 1), at(x, y))
 
 
+def check_overture(check, work: str) -> None:
+    """Buildings from Overture, where OpenStreetMap has none.
+
+    OSM is drawn by people, so a town is on it as far as somebody traced it.
+    Measured over the same size of box, Overture added 60 buildings to a
+    German town and 761 to a Turkish one - nearly trebling it. None of this
+    check needs the network or DuckDB: what is tested is the shape of the
+    answer and the rule that decides what to keep, which is where the bugs
+    would be.
+    """
+    import json as _json
+
+    from generator import osm as _osm
+    from generator import overture
+
+    check(isinstance(overture.available(), bool),
+          f"whether Overture can be reached is a plain yes or no "
+          f"({'DuckDB is installed' if overture.available() else 'no DuckDB here'})")
+    check("duckdb" in overture.why_unavailable().lower(),
+          "and without it the window says what to install")
+
+    def square(lat, lon, side_m, **row):
+        """One Overture row: a square building of `side_m` metres."""
+        d = side_m / 111320.0
+        e = d / max(0.2, math.cos(math.radians(lat)))
+        ring = [[lon, lat], [lon + e, lat], [lon + e, lat + d], [lon, lat + d],
+                [lon, lat]]
+        return {"id": row.get("id", "x"), "height": row.get("height"),
+                "levels": row.get("levels"), "class": row.get("cls"),
+                "geometry": {"type": "Polygon", "coordinates": [ring]}}
+
+    rows = [
+        square(38.60, 34.90, 12.0, id="a", cls="house"),
+        square(38.61, 34.91, 20.0, id="b", cls=None, levels=3, height=9.5),
+        square(38.62, 34.92, 1.5, id="c"),          # a sliver, not a building
+        {"id": "d", "geometry": {"type": "MultiPolygon", "coordinates": [
+            [[[34.93, 38.63], [34.9302, 38.63], [34.9302, 38.6302],
+              [34.93, 38.6302], [34.93, 38.63]]]]},
+         "height": None, "levels": None, "class": "barn"},
+    ]
+    feats = overture.to_features(rows)
+    check(len(feats) == 3,
+          f"a sliver is not a building and is left out ({len(rows)} rows, "
+          f"{len(feats)} kept)")
+    tags = {f.tags["building"] for f in feats}
+    check("house" in tags and "barn" in tags and "yes" in tags,
+          "Overture's class goes straight into the building tag, and a "
+          "machine-found roof with no class becomes a plain footprint")
+    levelled = [f for f in feats if f.tags.get("building:levels")]
+    check(levelled and levelled[0].tags["building:levels"] == "3"
+          and levelled[0].tags.get("height") == "9.5",
+          "storeys and height come across where Overture has them")
+    check(all(f.kind == "way" and f.osm_id < 0 for f in feats),
+          "and they arrive as ways with ids no OSM way can have, so nothing "
+          "downstream has to know where they came from")
+
+    # The rule that decides what is new: a centre inside a mapped building.
+    mapped = []
+    for f in feats[:1]:
+        mapped.append(_osm.OSMFeature(osm_id=1, kind="way",
+                                      tags={"building": "house"},
+                                      geometry=list(f.geometry)))
+    kept = overture.only_missing(feats, mapped)
+    check(len(kept) == len(feats) - 1,
+          f"a roof standing on a building OSM already has is dropped "
+          f"({len(feats)} offered, {len(kept)} kept)")
+    check(overture.only_missing(feats, []) == feats,
+          "and where OSM has nothing at all, all of them are kept")
+
+    # What is cached is only reused for the same box and the same release.
+    box = (38.60, 34.90, 38.64, 34.94)
+    path = overture.cache_path(work, "ovtest")
+    overture.save_cache(path, box, rows)
+    check(overture.load_cache(path, box) is not None,
+          "a fetch is kept beside the map, so the minutes are paid once")
+    check(overture.load_cache(path, (38.60, 34.90, 38.64, 34.95)) is None,
+          "a different area is not answered from it")
+    was = os.environ.get("KNOXMAP_OVERTURE_RELEASE")
+    os.environ["KNOXMAP_OVERTURE_RELEASE"] = "1999-01-01.0"
+    try:
+        stale = overture.load_cache(path, box)
+    finally:
+        if was is None:
+            os.environ.pop("KNOXMAP_OVERTURE_RELEASE", None)
+        else:
+            os.environ["KNOXMAP_OVERTURE_RELEASE"] = was
+    check(stale is None, "nor is a newer release answered from an older one")
+
+    # Without DuckDB the map is still made, from OSM alone.
+    out, stats = overture.add_missing([], box, work, "ovtest2")
+    if overture.available():
+        check(True, "DuckDB is here, so gap filling would run (not fetched in a check)")
+    else:
+        check(out == [] and stats["added"] == 0 and stats.get("why"),
+              "without DuckDB the map is the one OSM alone makes, and says why")
+
+    # ...but a map already fetched re-renders without it. Fetching is the one
+    # thing DuckDB is for, and asking for it before looking in the cache meant
+    # a folder handed to somebody else lost the buildings it had already paid
+    # minutes for.
+    seeded = os.path.join(work, "ovseed")
+    os.makedirs(seeded, exist_ok=True)
+    overture.save_cache(overture.cache_path(seeded, "m"), box, rows)
+    out, stats = overture.add_missing([], box, seeded, "m")
+    check(stats["cached"] and stats["added"] == len(feats)
+          and len(out) == len(feats),
+          f"a map already fetched fills its gaps again with no DuckDB at all "
+          f"({stats['added']} buildings back out of the cache)")
+
+    # The credit Overture's licence asks for, only on a map that used it.
+    import make_map_mod as _mod
+
+    proj = os.path.join(work, "ovattr-proj")
+    mod = os.path.join(work, "ovattr-mod")
+    os.makedirs(proj, exist_ok=True)
+    os.makedirs(mod, exist_ok=True)
+    with open(os.path.join(proj, "t_info.json"), "w", encoding="utf-8") as f:
+        _json.dump({"osm_bbox": list(box)}, f)
+    _mod.write_attribution(proj, mod, "Test Town")
+    plain = open(os.path.join(mod, "ATTRIBUTION.txt"), encoding="utf-8").read()
+    open(os.path.join(proj, "t_overture.json.gz"), "wb").write(b"x")
+    _mod.write_attribution(proj, mod, "Test Town")
+    filled = open(os.path.join(mod, "ATTRIBUTION.txt"), encoding="utf-8").read()
+    check("Overture" not in plain and "Overture Maps Foundation" in filled
+          and "OpenStreetMap" in filled,
+          "a map that used Overture credits it, and one that did not does not")
+
+
 def check_repair(check, out: str) -> None:
     """A project broken at its edges, as older versions and hand edits leave
     them, is repaired before compiling instead of stopping it."""
@@ -1097,8 +1225,13 @@ def check_repair(check, out: str) -> None:
 
 
 def check_memory_guard(check) -> None:
-    """A map too big for the memory there is says so, instead of dying with
-    MemoryError partway through drawing it (a 32-bit Python has about 2 GB)."""
+    """A map too big for the memory there is says so before it starts.
+
+    It is a warning now, not a refusal: nothing about an area stops a map
+    being built, because a big map can be built and what it costs is the
+    mapper's to spend. What this still has to do is say the number, so
+    somebody choosing an area knows, and so a run that does die of it has the
+    figure in its log."""
     import app as knoxapp
     import knoxlog
 
@@ -1117,12 +1250,67 @@ def check_memory_guard(check) -> None:
             knoxapp.sys = was
         import knoxpaths as _kp
         check(big and "32-bit" in big and _kp.setup_command() in big and not small,
-              "a map too big for a 32-bit Python is refused with a way out")
+              "a map too big for a 32-bit Python is warned about, with a way out")
         knoxlog.memory_status = lambda: (15_000_000_000, 900_000_000, 140_000_000_000)
         tight = knoxapp._too_big_for_memory(5400, 6000)
-        check(tight and "free" in tight, "a map too big for the free memory is refused")
+        check(tight and "free" in tight,
+              "and so is one too big for the memory that is free")
     finally:
         knoxlog.memory_status = real
+
+
+def check_no_size_wall(check, work: str) -> None:
+    """An area bigger than the comfortable one is still built.
+
+    Every size check used to answer 400 and the window greyed the button out,
+    so somebody who wanted a whole city could not have one at all. They are
+    warnings now: the window says what it will cost and the button stays lit.
+    What is still refused is a scale that is not a scale, because dividing the
+    world by zero is not a map anybody asked for.
+
+    Nothing here touches the network. The OpenStreetMap fetch is replaced with
+    something that fails at once, so a request that reaches it has been past
+    every size gate there is - which is the thing being tested.
+    """
+    import app as knoxapp
+
+    class Reached(RuntimeError):
+        """Raised where the download would start."""
+
+    def no_download(*_a, **_k):
+        raise Reached("got as far as the download")
+
+    client = knoxapp.app.test_client()
+    was_fetch = knoxapp.osm.fetch_features_tiled
+    was_out = knoxapp.OUTPUT_DIR
+    knoxapp.osm.fetch_features_tiled = no_download
+    knoxapp.OUTPUT_DIR = Path(work) / "huge-maps"
+    knoxapp.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        # Far past every old limit: about 1,100 km2 at half a metre a tile,
+        # which is 2.4 million tiles a side and a terabyte of bitmap.
+        huge = {"south": 51.2, "west": -0.6, "north": 51.5, "east": -0.1,
+                "metersPerTile": 0.5, "mapName": "selftest-huge"}
+        said = client.post("/api/generate", json=huge)
+        body = (said.get_json() or {}).get("error", "")
+        check("got as far as the download" in body,
+              f"a map far past every old limit is built, not refused "
+              f"({said.status_code}: {body[:60]})")
+
+        for scale, what in ((0, "zero"), (-1, "a negative"), (1e9, "a silly")):
+            bad = client.post("/api/generate", json={**huge, "metersPerTile": scale})
+            if bad.status_code != 400:
+                check(False, f"{what} scale should still be refused")
+                break
+        else:
+            check(True, "but a scale of zero, a negative one or a silly one is not")
+    finally:
+        knoxapp.osm.fetch_features_tiled = was_fetch
+        knoxapp.OUTPUT_DIR = was_out
+
+    check(knoxapp.BIG_AREA_KM2 > 0 and knoxapp.BIG_TILES_PER_SIDE > 0
+          and knoxapp.BIG_LANDMARK_KM2 > 0,
+          "and the numbers behind the warnings are still there to warn with")
 
 
 def check_box_any(check) -> None:
@@ -1408,6 +1596,7 @@ def main(argv: list[str]) -> int:
         check_qt_env(check)
         check_compile_failures(check, work)
         check_wall_corners(check)
+        check_overture(check, work)
         check_repair(check, out)
         from knoxbuild.world import Placement, Zone, render_pzw
         edge = render_pzw(2, 2, "m.bmp", [Placement("a.tbx", 10, 599, 3, 3),
@@ -1662,6 +1851,7 @@ def main(argv: list[str]) -> int:
         check_missing_drive(check)
         check_straight_roads(check)
         check_mapstate(check, out)
+        check_no_size_wall(check, work)
         check_memory_guard(check)
         check_box_any(check)
 

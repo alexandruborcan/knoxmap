@@ -429,6 +429,17 @@ def write_attribution(project_dir: str, mod_root: str, name: str) -> None:
                 info = _json.load(f)
             break
     bbox = info.get("osm_bbox") or [info.get("bbox", {}).get(k) for k in ("south", "west", "north", "east")]
+    # A map built with Fill gaps carries buildings from Overture Maps as well.
+    # Overture publishes its buildings theme under ODbL too, so the credit is
+    # owed on the same terms and goes in the same file. The fetch leaves its
+    # answer beside the map, so its being there is what says the data was used.
+    overture = any(e.endswith("_overture.json.gz") for e in os.listdir(project_dir))
+    from_overture = """
+Some buildings come from Overture Maps (https://overturemaps.org), whose
+buildings theme is published under ODbL as well, and is itself OpenStreetMap
+with machine-detected roofprints layered under it. Credit "Building data (c)
+Overture Maps Foundation" alongside OpenStreetMap if you publish this map.
+""" if overture else ""
     text = f"""{name}
 {"=" * len(name)}
 
@@ -444,7 +455,7 @@ the OpenStreetMap data inside this area (south, west, north, east):
 downloaded on or before {datetime.date.today().isoformat()}, using the open-source
 method in KnoxMap at the address above. If you publish this map, keep this
 file with it and credit "Map data (c) OpenStreetMap contributors".
-
+{from_overture}
 Buildings' interiors, residents and zombies are invented by the generator and
 do not describe the real places or anyone connected with them. Not for
 navigation or any real-world use.
