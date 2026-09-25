@@ -57,12 +57,32 @@ rmdir /s /q ".venv"
 exit /b 0
 
 :portable_python
-rem No 64-bit Python on this PC: fetch the official python.org build that is
-rem published as a NuGet package (a plain zip with venv and pip), check its
-rem fingerprint and keep it inside the KnoxMap folder. Nothing is installed
-rem system-wide.
 echo 64-bit Python 3.10 or newer was not found - downloading a private copy (about 14 MB)...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol='Tls12'; $z='.python.zip'; Invoke-WebRequest -UseBasicParsing 'https://api.nuget.org/v3-flatcontainer/python/3.13.7/python.3.13.7.nupkg' -OutFile $z; if ((Get-FileHash $z -Algorithm SHA256).Hash -ne 'e74272a824e23702dfb5f3e11c3660ceabac7487e3366d4551391db5cd762853') { Remove-Item $z; throw 'The Python download did not match its fingerprint.' }; if (Test-Path '.python') { Remove-Item -Recurse -Force '.python' }; Expand-Archive $z '.python'; Remove-Item $z" || goto :no_portable
+
+rem Download using native Windows curl
+curl.exe -sL "https://api.nuget.org/v3-flatcontainer/python/3.13.7/python.3.13.7.nupkg" -o ".python.zip" || goto :no_portable
+
+rem Verify the hash using native certutil
+set "EXPECTED_HASH=e74272a824e23702dfb5f3e11c3660ceabac7487e3366d4551391db5cd762853"
+set "ACTUAL_HASH="
+for /f "skip=1 tokens=* usebackq" %%H in (`certutil -hashfile ".python.zip" SHA256`) do (
+    if not defined ACTUAL_HASH set "ACTUAL_HASH=%%H"
+)
+rem Remove spaces from certutil output
+set "ACTUAL_HASH=%ACTUAL_HASH: =%"
+
+if /I not "%ACTUAL_HASH%"=="%EXPECTED_HASH%" (
+    echo The Python download did not match its fingerprint.
+    del ".python.zip"
+    goto :no_portable
+)
+
+rem Extract using native tar
+if exist ".python" rmdir /s /q ".python"
+mkdir ".python"
+tar.exe -xf ".python.zip" -C ".python" || goto :no_portable
+del ".python.zip"
+
 if not exist ".python\tools\python.exe" goto :no_portable
 ".python\tools\python.exe" -c "import sys; sys.exit(sys.maxsize <= 2**32)" >nul 2>nul || goto :no_portable
 set PY=".python\tools\python.exe"
